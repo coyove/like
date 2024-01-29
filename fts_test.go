@@ -1,4 +1,4 @@
-package fts
+package like
 
 import (
 	"bytes"

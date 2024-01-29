@@ -1,11 +1,11 @@
-package fts
+package like
 
 import (
 	"encoding/binary"
 	"fmt"
-	"zzz/array16"
 
 	"github.com/coyove/bbolt"
+	"github.com/coyove/like/array16"
 )
 
 func Index(db *bbolt.DB, ns string, doc Document, maxRunes uint16) error {

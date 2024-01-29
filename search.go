@@ -1,4 +1,4 @@
-package fts
+package like
 
 import (
 	"bytes"
@@ -9,9 +9,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
-	"zzz/array16"
 
 	"github.com/coyove/bbolt"
+	"github.com/coyove/like/array16"
 )
 
 type matchspan struct {

@@ -1,11 +1,11 @@
-package fts
+package like
 
 import (
 	"hash/crc32"
 	"unicode"
 	"unicode/utf8"
-	"zzz/array16"
 
+	"github.com/coyove/like/array16"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
