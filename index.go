@@ -8,22 +8,26 @@ import (
 	"github.com/coyove/like/array16"
 )
 
-func (db *DB) Index(doc Document) error {
-	return db.BatchIndex([]Document{doc})
+func (db *DB) Index(doc Document, content string) error {
+	return db.BatchIndex([]Document{doc}, []string{content})
 }
 
-func (db *DB) BatchIndex(docs []Document) error {
+func (db *DB) BatchIndex(docs []Document, contents []string) error {
 	if len(docs) == 0 {
 		return nil
 	}
+	if len(contents) != len(docs) {
+		return fmt.Errorf("number of documents mismatches contents")
+	}
+
 	tx, err := db.Store.Begin(true)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	for _, doc := range docs {
-		chars, _ := Collect(doc.Content, db.MaxChars)
+	for i, doc := range docs {
+		chars, _ := Collect(contents[i], db.MaxChars)
 		if len(doc.ID) == 0 || len(chars) == 0 {
 			return fmt.Errorf("empty document")
 		}
@@ -74,7 +78,6 @@ func (db *DB) BatchIndex(docs []Document) error {
 			}
 			payload = append(payload, byte(k>>16), byte(k>>8), byte(k))
 		}
-		payload = append(payload, doc.Content...)
 
 		bkId.Put(doc.ID, payload)
 	}

@@ -194,3 +194,15 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 		i++
 	}
 }
+
+func runesHasPrefix(a []rune, prefix []rune) bool {
+	if len(a) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if prefix[i] != a[i] {
+			return false
+		}
+	}
+	return true
+}

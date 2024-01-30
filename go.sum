@@ -1,5 +1,7 @@
 github.com/coyove/bbolt v1.3.9-0.20240125143137-5711267b6f67 h1:92Md13b7XBTUvCVVBLqkmpexkUFoXEBevlJjyDHdl30=
 github.com/coyove/bbolt v1.3.9-0.20240125143137-5711267b6f67/go.mod h1:XpFeI1nakkDbuJ3peA8HArDMDBEjbOmnRrW2SBnNu/M=
+github.com/coyove/bbolt v1.3.9-0.20240130083025-6c2a7cffe329 h1:CDiOWkE8cet2gK/iMdw6u5IHUT+lKgfK/gzTOiEsVRg=
+github.com/coyove/bbolt v1.3.9-0.20240130083025-6c2a7cffe329/go.mod h1:XpFeI1nakkDbuJ3peA8HArDMDBEjbOmnRrW2SBnNu/M=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

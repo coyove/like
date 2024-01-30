@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -14,17 +13,10 @@ import (
 	"github.com/coyove/like/array16"
 )
 
-type matchspan struct {
-	index int
-	last  rune
-}
-
 type Document struct {
-	Index   uint64
-	ID      []byte
-	Score   uint32
-	Content string
-	matchAt []matchspan
+	Index uint64
+	ID    []byte
+	Score uint32
 }
 
 func (d Document) IntID() (v uint64) {
@@ -62,53 +54,93 @@ func (d Document) String() string {
 		}
 	}
 	p = fmt.Sprintf(p, d.Index, d.ID)
-	p += fmt.Sprintf(", %d, %db", d.Score, len(d.Content))
-	if len(d.matchAt) > 0 {
-		p += fmt.Sprintf(", m=%v", d.matchAt)
-	}
+	p += fmt.Sprintf(", %d", d.Score)
 	return p + ")"
 }
 
-func (d Document) Highlight(left, right string) (out string) {
-	if len(d.matchAt) == 0 {
-		return d.Content
+func (d SearchMetrics) Highlight(content string, left, right string) (out string) {
+	if len(d.Chars) == 0 {
+		return content
 	}
-	sort.Slice(d.matchAt, func(i, j int) bool {
-		return d.matchAt[i].index < d.matchAt[j].index
-	})
 
-	defer func(origMatch []matchspan) {
-		if r := recover(); r != nil {
-			d.matchAt = origMatch
-			out = fmt.Sprintf("#FIXME:%v\n#", d.String()) + d.Content + "\n#FIXME"
+	type radix struct {
+		ch   rune
+		end  bool
+		next map[rune]*radix
+		up   *radix
+	}
+
+	root := &radix{next: map[rune]*radix{}}
+	for _, m := range d.Chars {
+		n := root
+		for i, r := range m {
+			if n.next == nil {
+				n.next = map[rune]*radix{}
+			}
+			if n.next[r] == nil {
+				n.next[r] = &radix{ch: r, up: n}
+			}
+			n = n.next[r]
+			if i == len(m)-1 {
+				n.end = true
+			}
 		}
-	}(d.matchAt)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			out = fmt.Sprintf("#FIXME:%v\n#", d.Chars) + content + "\n#FIXME"
+		}
+	}()
 
 	var spans [][2]int
 	var expands [][4]int
-	CollectFunc(d.Content, func(i int, pos [2]int, r rune, grams []rune) bool {
-		if i == d.matchAt[0].index {
-			start, end := pos[0], pos[0]
-			CollectFunc(d.Content[pos[0]:], func(_ int, pos2 [2]int, r2 rune, grams2 []rune) bool {
-				if r2 == d.matchAt[0].last {
-					end = pos[0] + pos2[0] + pos2[1]
-					return false
-				}
-				return true
-			})
+	CollectFunc(content, func(_ int, pos [2]int, r rune, grams []rune) bool {
+		if len(root.next) == 0 {
+			return false
+		}
+		if root.next[r] == nil {
+			return true
+		}
 
-			if end > start {
-				if len(spans) > 0 && start < spans[len(spans)-1][1] {
-					spans[len(spans)-1][1] = end
-					expands[len(expands)-1][1] = end
-				} else {
-					expands = append(expands, [4]int{start, end, len(spans), len(spans) + 1})
-					spans = append(spans, [2]int{start, end})
+		n := root
+		ok, start, end := false, pos[0], pos[0]
+		CollectFunc(content[pos[0]:], func(_ int, pos2 [2]int, r2 rune, grams2 []rune) bool {
+			if n.next[r2] == nil {
+				ok = false
+				return false
+			}
+			n = n.next[r2]
+			if !n.end {
+				return true
+			}
+			if len(n.next) == 0 {
+				for n0 := n.up; n0 != nil; n0 = n0.up {
+					delete(n0.next, n.ch)
+					if len(n0.next) > 0 {
+						break
+					}
+					n = n0
 				}
 			}
-			d.matchAt = d.matchAt[1:]
+			end = pos[0] + pos2[0] + pos2[1]
+			ok = true
+			return false
+		})
+		if !ok {
+			return true
 		}
-		return len(d.matchAt) > 0
+
+		if end > start {
+			if len(spans) > 0 && start < spans[len(spans)-1][1] {
+				spans[len(spans)-1][1] = end
+				expands[len(expands)-1][1] = end
+			} else {
+				expands = append(expands, [4]int{start, end, len(spans), len(spans) + 1})
+				spans = append(spans, [2]int{start, end})
+			}
+		}
+		return true
 	})
 
 	const abbr = 60
@@ -127,15 +159,15 @@ func (d Document) Highlight(left, right string) (out string) {
 		start, end := e[0], e[1]
 		start0, end0 := e[0], e[1]
 		for start-start0 < abbr && start0 > 0 {
-			r, w := utf8.DecodeLastRuneInString(d.Content[:start0])
+			r, w := utf8.DecodeLastRuneInString(content[:start0])
 			if r == utf8.RuneError {
 				break
 			}
 			start0 -= w
 		}
 
-		for end0-end < abbr && end0 < len(d.Content) {
-			r, w := utf8.DecodeRuneInString(d.Content[end0:])
+		for end0-end < abbr && end0 < len(content) {
+			r, w := utf8.DecodeRuneInString(content[end0:])
 			if r == utf8.RuneError {
 				break
 			}
@@ -147,15 +179,15 @@ func (d Document) Highlight(left, right string) (out string) {
 		}
 
 		for i := e[2]; i < e[3]; i++ {
-			p.WriteString(d.Content[start0:spans[i][0]])
+			p.WriteString(content[start0:spans[i][0]])
 			p.WriteString(left)
-			p.WriteString(d.Content[spans[i][0]:spans[i][1]])
+			p.WriteString(content[spans[i][0]:spans[i][1]])
 			p.WriteString(right)
 			start0 = spans[i][1]
 		}
 
-		p.WriteString(d.Content[start0:end0])
-		eoc = eoc || end0 == len(d.Content)
+		p.WriteString(content[start0:end0])
+		eoc = eoc || end0 == len(content)
 	}
 
 	if !eoc {
@@ -170,11 +202,13 @@ type cursor struct {
 }
 
 type SearchMetrics struct {
-	Err        error
-	Seek       int
-	Scan       int
-	SwitchHead int
-	Miss       int
+	Chars          [][]rune
+	Err            error
+	Seek           int
+	Scan           int
+	SwitchHead     int
+	FastSwitchHead int
+	Miss           int
 }
 
 func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) (res []Document, next []byte) {
@@ -203,6 +237,7 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 		chars = append(chars, CollectChars(term, uint16(left))...)
 		if len(chars) > old {
 			segs = append(segs, [2]int{old, len(chars) - old})
+			metrics.Chars = append(metrics.Chars, chars[old:])
 		}
 	}
 	if len(chars) == 0 {
@@ -244,8 +279,25 @@ SWITCH_HEAD:
 				continue
 			}
 
-			cur.key, cur.value = cur.Seek(head.key)
+			// Try fast path to avoid seek
+			var same bool
+		FAST:
+			if cur.key, cur.value, same = cur.PrevSamePage(); same {
+				switch bytes.Compare(cur.key, head.key) {
+				case 1:
+					goto FAST
+				case 0:
+					continue
+				case -1:
+					head = cur
+					metrics.FastSwitchHead++
+					continue SWITCH_HEAD
+				}
+			}
+
 			metrics.Seek++
+
+			cur.key, cur.value = cur.Seek(head.key)
 			if len(cur.key) == 0 {
 				cur.key, cur.value = cur.Last()
 			}
@@ -276,29 +328,26 @@ SWITCH_HEAD:
 		// 	}
 		metrics.Scan++
 
-		var matchAt []matchspan
+		match := false
 		for _, seg := range segs {
 			start, length := seg[0], seg[1]
-			m0 := -1
 			array16.Foreach(cursors[start].value, func(pos uint16) bool {
-				m0 = -1
+				match = false
 				for i := start + 1; i < start+length; i++ {
 					if array16.Contains(cursors[i].value, uint16(i-start)+pos) == -1 {
 						metrics.Miss++
 						return true
 					}
 				}
-				m0 = int(pos)
+				match = true
 				return false
 			})
-			if m0 == -1 {
-				matchAt = nil
+			if !match {
 				break
 			}
-			matchAt = append(matchAt, matchspan{index: m0, last: chars[start+length-1]})
 		}
 
-		if len(matchAt) > 0 {
+		if match {
 			if len(res) >= n {
 				return res[:n], append([]byte(nil), cursors[0].key...)
 			}
@@ -308,26 +357,10 @@ SWITCH_HEAD:
 			score := binary.BigEndian.Uint32(cursors[0].key[:4])
 			docId := bkIndex.Get(indexBuf)
 
-			content := bkId.Get(docId)
-			if len(content) > 0 {
-				_, w := SortedUvarint(content)
-				content = content[w+4:]
-
-				runes1Len, w := binary.Uvarint(content)
-				content = content[w:]
-				content = content[runes1Len:]
-
-				runes2Len, w := binary.Uvarint(content)
-				content = content[w:]
-				content = content[runes2Len*3:]
-			}
-
 			res = append(res, Document{
-				Index:   index,
-				ID:      append([]byte(nil), docId...),
-				Score:   score,
-				Content: string(content),
-				matchAt: matchAt,
+				Index: index,
+				ID:    append([]byte(nil), docId...),
+				Score: score,
 			})
 		}
 
