@@ -161,13 +161,21 @@ type cursor struct {
 func Search(db *bbolt.DB, ns, query string, start []byte, n int) (res []Document, next []byte, err error) {
 	var chars []rune
 	var segs [][2]int
-	for len(query) > 0 {
+	for query = strings.TrimSpace(query); len(query) > 0; {
 		var term string
+		if query[0] == '"' {
+			if q := strings.IndexByte(query[1:], '"'); q > -1 {
+				term = query[1 : 1+q]
+				query = query[1+q+1:]
+				goto OK
+			}
+		}
 		if i := strings.IndexFunc(query, unicode.IsSpace); i == -1 {
 			term, query = query, ""
 		} else {
 			term, query = query[:i], strings.TrimSpace(query[i+1:])
 		}
+	OK:
 		old := len(chars)
 		chars = append(chars, CollectChars(term, 100)...)
 		if len(chars) > old {

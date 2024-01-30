@@ -86,7 +86,7 @@ func isContinue(r rune) bool {
 	if r < 65536 && continueBMP1Fast[r/8]&(1<<(r%8)) > 0 {
 		return true
 	}
-	return r < 0xE0000
+	return 65536 <= r && r < 0xE0000
 }
 
 func hashTrigram(a, b, c rune) rune {
@@ -140,6 +140,10 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 
 	for off := 0; off < len(source); {
 		r, w := utf8.DecodeRuneInString(source[off:])
+		if r == utf8.RuneError {
+			return
+		}
+
 		prevOff := [2]int{off, w}
 		off += w
 
