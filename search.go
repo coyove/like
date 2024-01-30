@@ -69,8 +69,13 @@ func (d Document) String() string {
 	return p + ")"
 }
 
-func (d Document) Highlight(class string) string {
-	const span = 100
+func (d Document) Highlight(class string) (out string) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = fmt.Sprintf("#FIXME:%v\n#", d.String()) + d.Content + "\n#FIXME"
+		}
+	}()
+
 	if len(d.matchAt) == 0 {
 		return ""
 	}
@@ -79,11 +84,10 @@ func (d Document) Highlight(class string) string {
 		return d.matchAt[i].index < d.matchAt[j].index
 	})
 
-	p := bytes.Buffer{}
+	var spans [][2]int
+	var expands [][4]int
 	CollectFunc(d.Content, func(i int, pos [2]int, r rune, grams []rune) bool {
 		if i == d.matchAt[0].index {
-			p.WriteString("...")
-
 			start, end := pos[0], pos[0]
 			CollectFunc(d.Content[pos[0]:], func(_ int, pos2 [2]int, r2 rune, grams2 []rune) bool {
 				if r2 == d.matchAt[0].last {
@@ -93,38 +97,59 @@ func (d Document) Highlight(class string) string {
 				return true
 			})
 
-			start0, end0 := start, end
-			for start-start0 < span && start0 > 0 {
-				r, w := utf8.DecodeLastRuneInString(d.Content[:start0])
-				if r == utf8.RuneError {
-					break
-				}
-				start0 -= w
+			if end > start {
+				expands = append(expands, [4]int{start, end, len(spans), len(spans) + 1})
+				spans = append(spans, [2]int{start, end})
 			}
-
-			for end0-end < span && end0 < len(d.Content) {
-				r, w := utf8.DecodeRuneInString(d.Content[end0:])
-				if r == utf8.RuneError {
-					break
-				}
-				end0 += w
-			}
-
-			p.WriteString(d.Content[start0:start])
-			if class != "" {
-				p.WriteString("<span class='" + class + "'>")
-			}
-			p.WriteString(d.Content[start:end])
-			if class != "" {
-				p.WriteString("</span>")
-			}
-			p.WriteString(d.Content[end:end0])
-			p.WriteString("...\n")
-
 			d.matchAt = d.matchAt[1:]
 		}
 		return len(d.matchAt) > 0
 	})
+
+	const abbr = 60
+
+	for i := len(expands) - 1; i > 0; i-- {
+		if expands[i][0]-expands[i-1][1] < abbr*2+10 {
+			expands[i-1][1] = expands[i][1]
+			expands[i-1][3] = expands[i][3]
+			expands = append(expands[:i], expands[i+1:]...)
+		}
+	}
+
+	p := bytes.Buffer{}
+	for _, e := range expands {
+		start, end := e[0], e[1]
+		start0, end0 := e[0], e[1]
+		for start-start0 < abbr && start0 > 0 {
+			r, w := utf8.DecodeLastRuneInString(d.Content[:start0])
+			if r == utf8.RuneError {
+				break
+			}
+			start0 -= w
+		}
+
+		for end0-end < abbr && end0 < len(d.Content) {
+			r, w := utf8.DecodeRuneInString(d.Content[end0:])
+			if r == utf8.RuneError {
+				break
+			}
+			end0 += w
+		}
+
+		p.WriteString("...")
+
+		for i := e[2]; i < e[3]; i++ {
+			p.WriteString(d.Content[start0:spans[i][0]])
+			p.WriteString("<span class='" + class + "'>")
+			p.WriteString(d.Content[spans[i][0]:spans[i][1]])
+			p.WriteString("</span>")
+			start0 = spans[i][1]
+		}
+
+		p.WriteString(d.Content[start0:end0])
+	}
+
+	p.WriteString("...")
 	return p.String()
 }
 
@@ -174,7 +199,7 @@ func Search(db *bbolt.DB, ns, query string, start []byte, n int) (res []Document
 		}
 		c := bk.Cursor()
 		k, v := c.Last()
-		if start != nil {
+		if len(start) > 0 {
 			k, v = c.Seek(start)
 		}
 		cursors[i] = &cursor{c, k, v}

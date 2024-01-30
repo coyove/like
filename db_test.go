@@ -115,9 +115,14 @@ func TestSearch(t *testing.T) {
 	// search = "康德"
 	// search = "b站 曹操"
 	// search = "b站"
-	search = "玩"
+	search = "玩 😌"
 	// search = "中華職棒"
 	// search = "箔"
+	// search = "como q alguien se marco mucho en el pantalon JAJAHA"
+
+	// Index(db, "test", Document{
+	// 	Content: "a como q alguien se marco mucho en el pantalon JAJAHA",
+	// }.SetIntID(0x100000), 10000)
 
 	fmt.Println("=======")
 	start := time.Now()
