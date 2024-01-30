@@ -8,20 +8,20 @@ import (
 	"github.com/coyove/like/array16"
 )
 
-func Index(db *bbolt.DB, ns string, doc Document, maxRunes uint16) error {
-	chars, _ := Collect(doc.Content, maxRunes)
+func (db *DB) Index(doc Document) error {
+	chars, _ := Collect(doc.Content, db.MaxChars)
 	if len(doc.ID) == 0 || len(chars) == 0 {
 		return fmt.Errorf("empty document")
 	}
 	// fmt.Println(chars)
 
-	tx, err := db.Begin(true)
+	tx, err := db.Store.Begin(true)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	bkId, index, oldExisted := deleteTx(tx, ns, doc.ID, "index")
+	bkId, index, oldExisted := deleteTx(tx, db.Namespace, doc.ID, "index")
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func Index(db *bbolt.DB, ns string, doc Document, maxRunes uint16) error {
 		// if len(v) > 1000 {
 		// 	fmt.Println(string(k), len(v), array16.Len(v))
 		// }
-		tmp = binary.BigEndian.AppendUint32(append(tmp[:0], ns...), k)
+		tmp = binary.BigEndian.AppendUint32(append(tmp[:0], db.Namespace...), k)
 		bk, _ := tx.CreateBucketIfNotExists(tmp)
 		bk.SetSequence(bk.Sequence() + 1)
 		if !oldExisted { // this is a new document.
@@ -73,14 +73,14 @@ func Index(db *bbolt.DB, ns string, doc Document, maxRunes uint16) error {
 	return tx.Commit()
 }
 
-func Delete(db *bbolt.DB, ns string, doc Document) error {
-	tx, err := db.Begin(true)
+func (db *DB) Delete(doc Document) error {
+	tx, err := db.Store.Begin(true)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	deleteTx(tx, ns, doc.ID, "delete")
+	deleteTx(tx, db.Namespace, doc.ID, "delete")
 	return tx.Commit()
 }
 
@@ -150,15 +150,15 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, source string) (*bbolt.Bucket
 	return bkId, index, len(oldScore) > 0
 }
 
-func Count(db *bbolt.DB, ns string) (int, int, error) {
-	tx, err := db.Begin(false)
+func (db *DB) Count() (int, int, error) {
+	tx, err := db.Store.Begin(false)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	bkId := tx.Bucket([]byte(ns))
-	bkIndex := tx.Bucket([]byte(ns + "index"))
+	bkId := tx.Bucket([]byte(db.Namespace))
+	bkIndex := tx.Bucket([]byte(db.Namespace + "index"))
 	if bkIndex != nil {
 		return int(bkIndex.Sequence()), int(bkId.Sequence()), nil
 	}

@@ -69,20 +69,20 @@ func (d Document) String() string {
 	return p + ")"
 }
 
-func (d Document) Highlight(class string) (out string) {
-	defer func() {
-		if r := recover(); r != nil {
-			out = fmt.Sprintf("#FIXME:%v\n#", d.String()) + d.Content + "\n#FIXME"
-		}
-	}()
-
+func (d Document) Highlight(left, right string) (out string) {
 	if len(d.matchAt) == 0 {
-		return ""
+		return d.Content
 	}
-
 	sort.Slice(d.matchAt, func(i, j int) bool {
 		return d.matchAt[i].index < d.matchAt[j].index
 	})
+
+	defer func(origMatch []matchspan) {
+		if r := recover(); r != nil {
+			d.matchAt = origMatch
+			out = fmt.Sprintf("#FIXME:%v\n#", d.String()) + d.Content + "\n#FIXME"
+		}
+	}(d.matchAt)
 
 	var spans [][2]int
 	var expands [][4]int
@@ -98,8 +98,13 @@ func (d Document) Highlight(class string) (out string) {
 			})
 
 			if end > start {
-				expands = append(expands, [4]int{start, end, len(spans), len(spans) + 1})
-				spans = append(spans, [2]int{start, end})
+				if len(spans) > 0 && start < spans[len(spans)-1][1] {
+					spans[len(spans)-1][1] = end
+					expands[len(expands)-1][1] = end
+				} else {
+					expands = append(expands, [4]int{start, end, len(spans), len(spans) + 1})
+					spans = append(spans, [2]int{start, end})
+				}
 			}
 			d.matchAt = d.matchAt[1:]
 		}
@@ -117,6 +122,7 @@ func (d Document) Highlight(class string) (out string) {
 	}
 
 	p := bytes.Buffer{}
+	eoc := false
 	for _, e := range expands {
 		start, end := e[0], e[1]
 		start0, end0 := e[0], e[1]
@@ -136,20 +142,25 @@ func (d Document) Highlight(class string) (out string) {
 			end0 += w
 		}
 
-		p.WriteString("...")
+		if start0 > 0 {
+			p.WriteString("...")
+		}
 
 		for i := e[2]; i < e[3]; i++ {
 			p.WriteString(d.Content[start0:spans[i][0]])
-			p.WriteString("<span class='" + class + "'>")
+			p.WriteString(left)
 			p.WriteString(d.Content[spans[i][0]:spans[i][1]])
-			p.WriteString("</span>")
+			p.WriteString(right)
 			start0 = spans[i][1]
 		}
 
 		p.WriteString(d.Content[start0:end0])
+		eoc = eoc || end0 == len(d.Content)
 	}
 
-	p.WriteString("...")
+	if !eoc {
+		p.WriteString("...")
+	}
 	return p.String()
 }
 
@@ -158,7 +169,14 @@ type cursor struct {
 	key, value []byte
 }
 
-func Search(db *bbolt.DB, ns, query string, start []byte, n int) (res []Document, next []byte, err error) {
+type SearchMetrics struct {
+	Err  error
+	Seek int
+	Scan int
+	Miss int
+}
+
+func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) (res []Document, next []byte) {
 	var chars []rune
 	var segs [][2]int
 	for query = strings.TrimSpace(query); len(query) > 0; {
@@ -177,7 +195,11 @@ func Search(db *bbolt.DB, ns, query string, start []byte, n int) (res []Document
 		}
 	OK:
 		old := len(chars)
-		chars = append(chars, CollectChars(term, 100)...)
+		left := int(db.MaxChars) - old
+		if left < 0 {
+			break
+		}
+		chars = append(chars, CollectChars(term, uint16(left))...)
 		if len(chars) > old {
 			segs = append(segs, [2]int{old, len(chars) - old})
 		}
@@ -188,20 +210,21 @@ func Search(db *bbolt.DB, ns, query string, start []byte, n int) (res []Document
 
 	cursors := make([]*cursor, len(chars))
 
-	tx, err := db.Begin(false)
+	tx, err := db.Store.Begin(false)
 	if err != nil {
-		return nil, nil, err
+		metrics.Err = err
+		return
 	}
 	defer tx.Rollback()
 
-	bkId := tx.Bucket([]byte(ns))
-	bkIndex := tx.Bucket([]byte(ns + "index"))
+	bkId := tx.Bucket([]byte(db.Namespace))
+	bkIndex := tx.Bucket([]byte(db.Namespace + "index"))
 	if bkId == nil || bkIndex == nil {
 		return
 	}
 
 	for i, r := range chars {
-		bk := tx.Bucket(binary.BigEndian.AppendUint32([]byte(ns), uint32(r)))
+		bk := tx.Bucket(binary.BigEndian.AppendUint32([]byte(db.Namespace), uint32(r)))
 		if bk == nil {
 			return
 		}
@@ -221,6 +244,7 @@ SWITCH_HEAD:
 			}
 
 			cur.key, cur.value = cur.Seek(head.key)
+			metrics.Seek++
 			if len(cur.key) == 0 {
 				cur.key, cur.value = cur.Last()
 			}
@@ -248,9 +272,9 @@ SWITCH_HEAD:
 		// 			return true
 		// 		})
 		// 	}
+		metrics.Scan++
 
 		var matchAt []matchspan
-		var miss int
 		for _, seg := range segs {
 			start, length := seg[0], seg[1]
 			m0 := -1
@@ -258,7 +282,7 @@ SWITCH_HEAD:
 				m0 = -1
 				for i := start + 1; i < start+length; i++ {
 					if array16.Contains(cursors[i].value, uint16(i-start)+pos) == -1 {
-						miss++
+						metrics.Miss++
 						return true
 					}
 				}
@@ -274,7 +298,7 @@ SWITCH_HEAD:
 
 		if len(matchAt) > 0 {
 			if len(res) >= n {
-				return res[:n], append([]byte(nil), cursors[0].key...), nil
+				return res[:n], append([]byte(nil), cursors[0].key...)
 			}
 
 			indexBuf := cursors[0].key[4:]

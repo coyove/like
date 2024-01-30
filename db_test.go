@@ -14,10 +14,16 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-var db, _ = bbolt.Open("fts.db", 0644, &bbolt.Options{
-	FreelistType: bbolt.FreelistMapType,
-	NoSync:       true,
-})
+var db DB
+
+func init() {
+	db.Store, _ = bbolt.Open("fts.db", 0644, &bbolt.Options{
+		FreelistType: bbolt.FreelistMapType,
+		NoSync:       true,
+	})
+	db.Namespace = "test"
+	db.MaxChars = 50000
+}
 
 func TestLocalJson(t *testing.T) {
 	buf, _ := os.ReadFile("/home/coyove/feed_1706076921.json")
@@ -29,10 +35,10 @@ func TestLocalJson(t *testing.T) {
 			continue
 		}
 		size += len(s)
-		Index(db, "test", Document{
+		db.Index(Document{
 			Content: s,
 			Score:   uint32(time.Now().Unix()),
-		}.SetIntID(uint64(i)), 10000)
+		}.SetIntID(uint64(i)))
 		fmt.Println(i, len(names), size)
 		if i >= 200000 {
 			break
@@ -48,12 +54,12 @@ func TestLocalJson(t *testing.T) {
 	// fmt.Println(fts.Search(db, "test", "\U00010FFB", nil, 100))
 	// return
 
-	res, _, _ := Search(db, "test", "âge hello do", nil, 100)
+	res, _ := db.Search("âge hello do", nil, 100, &SearchMetrics{})
 	for _, r := range res {
-		fmt.Println(r, r.Highlight("hl"))
+		fmt.Println(r, r.Highlight("<<<", ">>>"))
 	}
 
-	fmt.Println(Count(db, "test"))
+	fmt.Println(db.Count())
 
 }
 
@@ -92,10 +98,10 @@ func TestFillWikiContent(t *testing.T) {
 			case "text":
 				data := *(*string)(unsafe.Pointer(&data))
 				start := time.Now()
-				Index(db, "test", Document{
+				db.Index(Document{
 					Score:   uint32(time.Now().Unix()),
 					Content: data,
-				}.SetStringID(names[len(names)-1]), 50000)
+				}.SetStringID(names[len(names)-1]))
 				// }.SetIntID(uint64(len(names)-1)), data, 50000)
 				size += len(data)
 				fmt.Println(len(names), size, time.Since(start))
@@ -116,26 +122,25 @@ func TestSearch(t *testing.T) {
 	// search = "b站 曹操"
 	// search = "b站"
 	search = "玩 😌"
-	// search = "中華職棒"
+	search = "中華職棒 玩"
 	// search = "箔"
-	search = "  my home"
+	// search = " \" my world\""
+	// search = "hijk ijkl"
 
-	Index(db, "test", Document{Content: "this is my world"}.SetIntID(0x100000), 10000)
-	Index(db, "test", Document{Content: "world is my home"}.SetIntID(0x100001), 10000)
+	db.Index(Document{Content: "this is my world"}.SetIntID(0x100000))
+	db.Index(Document{Content: "world is my home"}.SetIntID(0x100001))
+	db.Index(Document{Content: "abcdefghijklmnopqrstuvwxyz"}.SetIntID(0x100002))
 
 	fmt.Println("=======")
 	start := time.Now()
 
 	for cursor := []byte(nil); ; {
-		idx, next, _ := Search(db, "test", search, cursor, 5)
-		// db.View(func(tx *bbolt.Tx) error {
-		// 	bk := tx.Bucket([]byte("ids"))
-		for _, i := range idx {
-			fmt.Println(i, i.Highlight("hl"))
+		m := &SearchMetrics{}
+		docs, next := db.Search(search, cursor, 5, m)
+		for _, i := range docs {
+			fmt.Println(i, i.Highlight(" <<<", ">>> "))
 		}
-		// 	return nil
-		// })
-		fmt.Println("=======")
+		fmt.Println("=======", m.Seek, m.Scan, m.Miss)
 		if len(next) == 0 {
 			break
 		}
