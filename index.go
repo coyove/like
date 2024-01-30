@@ -9,66 +9,75 @@ import (
 )
 
 func (db *DB) Index(doc Document) error {
-	chars, _ := Collect(doc.Content, db.MaxChars)
-	if len(doc.ID) == 0 || len(chars) == 0 {
-		return fmt.Errorf("empty document")
-	}
-	// fmt.Println(chars)
+	return db.BatchIndex([]Document{doc})
+}
 
+func (db *DB) BatchIndex(docs []Document) error {
+	if len(docs) == 0 {
+		return nil
+	}
 	tx, err := db.Store.Begin(true)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	bkId, index, oldExisted := deleteTx(tx, db.Namespace, doc.ID, "index")
-	if err != nil {
-		return err
-	}
-
-	var tmp []byte
-
-	newScore := binary.BigEndian.AppendUint32(nil, doc.Score)
-
-	var runes1 []uint16
-	var runes2 []uint32
-
-	for k, v := range chars {
-		k := uint32(k)
-		if k < 0xFFFF {
-			runes1 = append(runes1, uint16(k))
-		} else {
-			runes2 = append(runes2, k)
+	for _, doc := range docs {
+		chars, _ := Collect(doc.Content, db.MaxChars)
+		if len(doc.ID) == 0 || len(chars) == 0 {
+			return fmt.Errorf("empty document")
 		}
-		// if len(v) > 1000 {
-		// 	fmt.Println(string(k), len(v), array16.Len(v))
-		// }
-		tmp = binary.BigEndian.AppendUint32(append(tmp[:0], db.Namespace...), k)
-		bk, _ := tx.CreateBucketIfNotExists(tmp)
-		bk.SetSequence(bk.Sequence() + 1)
-		if !oldExisted { // this is a new document.
-			bk.FillPercent = 0.9
+		// fmt.Println(chars)
+
+		bkId, index, oldExisted := deleteTx(tx, db.Namespace, doc.ID, "index")
+		if err != nil {
+			return err
 		}
-		bk.Put(AppendSortedUvarint(newScore, index), v)
-	}
 
-	payload := AppendSortedUvarint(nil, index)
-	payload = binary.BigEndian.AppendUint32(payload, doc.Score)
+		var tmp []byte
 
-	buf1 := array16.CompressFull(runes1)
-	payload = binary.AppendUvarint(payload, uint64(len(buf1)))
-	payload = append(payload, buf1...)
-	payload = binary.AppendUvarint(payload, uint64(len(runes2)))
-	for _, k := range runes2 {
-		k -= 0x10000
-		if k > 0xFFFFFF {
-			return fmt.Errorf("invalid unicode %x", k+0x10000)
+		newScore := binary.BigEndian.AppendUint32(nil, doc.Score)
+
+		var runes1 []uint16
+		var runes2 []uint32
+
+		for k, v := range chars {
+			k := uint32(k)
+			if k < 0xFFFF {
+				runes1 = append(runes1, uint16(k))
+			} else {
+				runes2 = append(runes2, k)
+			}
+			// if len(v) > 1000 {
+			// 	fmt.Println(string(k), len(v), array16.Len(v))
+			// }
+			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], db.Namespace...), k)
+			bk, _ := tx.CreateBucketIfNotExists(tmp)
+			bk.SetSequence(bk.Sequence() + 1)
+			if !oldExisted { // this is a new document.
+				bk.FillPercent = 0.9
+			}
+			bk.Put(AppendSortedUvarint(newScore, index), v)
 		}
-		payload = append(payload, byte(k>>16), byte(k>>8), byte(k))
-	}
-	payload = append(payload, doc.Content...)
 
-	bkId.Put(doc.ID, payload)
+		payload := AppendSortedUvarint(nil, index)
+		payload = binary.BigEndian.AppendUint32(payload, doc.Score)
+
+		buf1 := array16.CompressFull(runes1)
+		payload = binary.AppendUvarint(payload, uint64(len(buf1)))
+		payload = append(payload, buf1...)
+		payload = binary.AppendUvarint(payload, uint64(len(runes2)))
+		for _, k := range runes2 {
+			k -= 0x10000
+			if k > 0xFFFFFF {
+				return fmt.Errorf("invalid unicode %x", k+0x10000)
+			}
+			payload = append(payload, byte(k>>16), byte(k>>8), byte(k))
+		}
+		payload = append(payload, doc.Content...)
+
+		bkId.Put(doc.ID, payload)
+	}
 
 	return tx.Commit()
 }

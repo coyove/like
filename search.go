@@ -170,10 +170,11 @@ type cursor struct {
 }
 
 type SearchMetrics struct {
-	Err  error
-	Seek int
-	Scan int
-	Miss int
+	Err        error
+	Seek       int
+	Scan       int
+	SwitchHead int
+	Miss       int
 }
 
 func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) (res []Document, next []byte) {
@@ -263,6 +264,7 @@ SWITCH_HEAD:
 			}
 
 			head = cur
+			metrics.SwitchHead++
 			continue SWITCH_HEAD
 		}
 

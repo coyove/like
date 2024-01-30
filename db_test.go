@@ -2,16 +2,15 @@ package like
 
 import (
 	"compress/bzip2"
+	"encoding/csv"
 	"encoding/xml"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 	"unsafe"
 
 	"github.com/coyove/bbolt"
-	"github.com/tidwall/gjson"
 )
 
 var db DB
@@ -25,25 +24,40 @@ func init() {
 	db.MaxChars = 50000
 }
 
-func TestLocalJson(t *testing.T) {
-	buf, _ := os.ReadFile("/home/coyove/feed_1706076921.json")
-	names := strings.Split(*(*string)(unsafe.Pointer(&buf)), "\n")
-	size := 0
-	for i, line := range names {
-		s := gjson.Parse(line).Get("content").Str
-		if s == "" {
-			continue
-		}
-		size += len(s)
-		db.Index(Document{
-			Content: s,
-			Score:   uint32(time.Now().Unix()),
-		}.SetIntID(uint64(i)))
-		fmt.Println(i, len(names), size)
-		if i >= 200000 {
+func TestDataset(t *testing.T) {
+	in, _ := os.Open("dataset/full_dataset.csv")
+	defer in.Close()
+	rd := csv.NewReader(in)
+	start := time.Now()
+	docs := []Document{}
+
+	for i := 0; ; i++ {
+		line, err := rd.Read()
+		if err != nil {
 			break
 		}
+		if i == 0 {
+			continue
+		}
+
+		title := line[1]
+		ingr := line[2]
+		steps := line[3]
+		docs = append(docs, Document{
+			Score:   uint32(i),
+			Content: title + " " + ingr + " " + steps,
+		}.SetStringID(title))
+
+		if len(docs) == 1000 {
+			err := db.BatchIndex(docs)
+			if err != nil {
+				panic(err)
+			}
+			docs = docs[:0]
+			fmt.Println(i, time.Now())
+		}
 	}
+	fmt.Println("indexed in", time.Since(start))
 
 	// Index(db, "test", Document{Score: 100}.SetIntID(999), "zzzzzz\U00010FFA", 100)
 	// fmt.Println(fts.Search(db, "test", "zzz", nil, 100))
@@ -54,7 +68,7 @@ func TestLocalJson(t *testing.T) {
 	// fmt.Println(fts.Search(db, "test", "\U00010FFB", nil, 100))
 	// return
 
-	res, _ := db.Search("âge hello do", nil, 100, &SearchMetrics{})
+	res, _ := db.Search("egg", nil, 100, &SearchMetrics{})
 	for _, r := range res {
 		fmt.Println(r, r.Highlight("<<<", ">>>"))
 	}
