@@ -44,8 +44,7 @@ func TestDataset(t *testing.T) {
 	defer in.Close()
 	rd := csv.NewReader(in)
 	start := time.Now()
-	docs := []Document{}
-	contents := []string{}
+	docs := []IndexDocument{}
 
 	for i := 0; ; i++ {
 		line, err := rd.Read()
@@ -59,16 +58,17 @@ func TestDataset(t *testing.T) {
 		title := line[1]
 		ingr := line[2]
 		steps := line[3]
-		docs = append(docs, Document{Score: uint32(i)}.SetStringID(title))
-		contents = append(contents, title+" "+ingr+" "+steps)
+		docs = append(docs, IndexDocument{
+			Score:   uint32(i),
+			Content: title + " " + ingr + " " + steps,
+		}.SetStringID(title+" "+ingr+" "+steps))
 
 		if len(docs) == 1000 {
-			err := db.BatchIndex(docs, contents)
+			err := db.BatchIndex(docs)
 			if err != nil {
 				panic(err)
 			}
 			docs = docs[:0]
-			contents = contents[:0]
 			fmt.Println(i, time.Now())
 		}
 	}
@@ -83,14 +83,7 @@ func TestDataset(t *testing.T) {
 	// fmt.Println(fts.Search(db, "test", "\U00010FFB", nil, 100))
 	// return
 
-	m := &SearchMetrics{}
-	res, _ := db.Search("egg", nil, 100, m)
-	for _, r := range res {
-		fmt.Println(r, m.Highlight("", "<<<", ">>>"))
-	}
-
 	fmt.Println(db.Count())
-
 }
 
 func TestFillWikiContent(t *testing.T) {
@@ -128,7 +121,10 @@ func TestFillWikiContent(t *testing.T) {
 			case "text":
 				id := names[len(names)-1]
 				start := time.Now()
-				db.Index(Document{Score: uint32(time.Now().Unix())}.SetStringID(id), *(*string)(unsafe.Pointer(&data)))
+				db.Index(IndexDocument{
+					Score:   uint32(time.Now().Unix()),
+					Content: *(*string)(unsafe.Pointer(&data)),
+				}.SetStringID(id))
 				saveContent(id, data)
 				size += len(data)
 				fmt.Println(len(names), size, time.Since(start))
@@ -152,10 +148,12 @@ func TestSearch(t *testing.T) {
 	search = "中華職棒 一"
 	// search = "箔"
 	search = " world view"
-	// search = "egg \"soup cans\" bread"
+	search = "egg \"soup cans\" bread"
 
 	dummy := func(id string, content string) {
-		db.Index(Document{}.SetStringID(id), content)
+		db.Index(IndexDocument{
+			Content: content,
+		}.SetStringID(id))
 		saveContent(id, []byte(content))
 	}
 	dummy("100000", "this is my world")
@@ -178,12 +176,15 @@ func TestSearch(t *testing.T) {
 
 		start = time.Now()
 		for i := range x {
+			if x[i] == "" {
+				x[i] = string(docs[i].ID)
+			}
 			x[i] = m.Highlight(x[i], " <<<", ">>> ")
 		}
 		hl += time.Since(start)
 
 		for i, line := range x {
-			fmt.Println(i, "==", line)
+			fmt.Println(docs[i], "==", line)
 		}
 
 		fmt.Println("=======", m.Seek, m.SwitchHead, m.FastSwitchHead, m.Scan, m.Miss)

@@ -8,16 +8,34 @@ import (
 	"github.com/coyove/like/array16"
 )
 
-func (db *DB) Index(doc Document, content string) error {
-	return db.BatchIndex([]Document{doc}, []string{content})
+type IndexDocument struct {
+	ID      []byte
+	Score   uint32
+	Content string
 }
 
-func (db *DB) BatchIndex(docs []Document, contents []string) error {
+func (d IndexDocument) SetID(v []byte) IndexDocument {
+	d.ID = v
+	return d
+}
+
+func (d IndexDocument) SetIntID(v uint64) IndexDocument {
+	d.ID = binary.BigEndian.AppendUint64(nil, v)
+	return d
+}
+
+func (d IndexDocument) SetStringID(v string) IndexDocument {
+	d.ID = append(d.ID[:0], v...)
+	return d
+}
+
+func (db *DB) Index(doc IndexDocument) error {
+	return db.BatchIndex([]IndexDocument{doc})
+}
+
+func (db *DB) BatchIndex(docs []IndexDocument) error {
 	if len(docs) == 0 {
 		return nil
-	}
-	if len(contents) != len(docs) {
-		return fmt.Errorf("number of documents mismatches contents")
 	}
 
 	tx, err := db.Store.Begin(true)
@@ -26,8 +44,8 @@ func (db *DB) BatchIndex(docs []Document, contents []string) error {
 	}
 	defer tx.Rollback()
 
-	for i, doc := range docs {
-		chars, _ := Collect(contents[i], db.MaxChars)
+	for _, doc := range docs {
+		chars, _ := Collect(doc.Content, db.MaxChars)
 		if len(doc.ID) == 0 || len(chars) == 0 {
 			return fmt.Errorf("empty document")
 		}
@@ -85,7 +103,7 @@ func (db *DB) BatchIndex(docs []Document, contents []string) error {
 	return tx.Commit()
 }
 
-func (db *DB) Delete(doc Document) error {
+func (db *DB) Delete(doc IndexDocument) error {
 	tx, err := db.Store.Begin(true)
 	if err != nil {
 		return err
