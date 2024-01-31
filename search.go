@@ -111,8 +111,15 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 SWITCH_HEAD:
 	for head := cursors[0]; len(head.key) > 0; {
 		for _, cur := range cursors {
-			if bytes.Equal(head.key, cur.key) {
+			cmp := bytes.Compare(cur.key, head.key)
+			if cmp == 0 {
 				continue
+			}
+
+			if cmp < 0 {
+				head = cur
+				metrics.FastSwitchHead++
+				continue SWITCH_HEAD
 			}
 
 			// Try fast path to avoid seek
@@ -130,7 +137,6 @@ SWITCH_HEAD:
 					continue SWITCH_HEAD
 				}
 			}
-
 			metrics.Seek++
 
 			cur.key, cur.value = cur.Seek(head.key)
@@ -138,7 +144,7 @@ SWITCH_HEAD:
 				cur.key, cur.value = cur.Last()
 			}
 
-			cmp := bytes.Compare(cur.key, head.key)
+			cmp = bytes.Compare(cur.key, head.key)
 			if cmp == 1 {
 				cur.key, cur.value = cur.Prev()
 				if len(cur.key) == 0 {

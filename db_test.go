@@ -159,6 +159,9 @@ func TestSearch(t *testing.T) {
 	dummy("100000", "this is my world")
 	dummy("100001", "world is my home")
 	dummy("100002", "abcdefghijklmnopqrstuvwxyz")
+	dummy("100003", "不像我都不能跑步")
+
+	search = "不像 不能 跑步"
 
 	fmt.Println("=======")
 
