@@ -48,10 +48,22 @@ type cursor struct {
 }
 
 func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) (res []Document, next []byte) {
+	if metrics == nil {
+		metrics = &SearchMetrics{}
+	}
+	metrics.Query = query
+
 	var chars []rune
+	var charsEx [][]rune
 	var segs [][2]int
+
 	for query = strings.TrimSpace(query); len(query) > 0; {
 		var term string
+		var exclude bool
+		if query[0] == '-' {
+			exclude = true
+			query = query[1:]
+		}
 		if query[0] == '"' {
 			if q := strings.IndexByte(query[1:], '"'); q > -1 {
 				term = query[1 : 1+q]
@@ -64,17 +76,19 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 		} else {
 			term, query = query[:i], strings.TrimSpace(query[i+1:])
 		}
+
 	OK:
-		old := len(chars)
-		left := int(db.MaxChars) - old
-		if left < 0 {
-			break
+		if len(term) == 0 {
+			continue
 		}
+
+		// Start collecting chars.
+		var parts []rune
 		CollectFunc(term, func(i int, off [2]int, r rune, gram []rune) bool {
-			if i >= left {
+			if i >= int(db.MaxChars) {
 				return false
 			}
-			chars = append(chars, r)
+			parts = append(parts, r)
 			switch len(gram) {
 			case 2, 3:
 				metrics.Collected = append(metrics.Collected, string(gram))
@@ -84,16 +98,23 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 			return true
 		})
 
-		if len(chars) > old {
-			segs = append(segs, [2]int{old, len(chars) - old})
-			metrics.Chars = append(metrics.Chars, chars[old:])
+		if len(parts) == 0 {
+			continue
+		}
+
+		if exclude {
+			charsEx = append(charsEx, parts)
+			metrics.CharsEx = append(metrics.CharsEx, parts)
+		} else {
+			segs = append(segs, [2]int{len(chars), len(parts)})
+			chars = append(chars, parts...)
+			metrics.Chars = append(metrics.Chars, parts)
 		}
 	}
+
 	if len(chars) == 0 {
 		return
 	}
-
-	cursors := make([]*cursor, len(chars))
 
 	tx, err := db.Store.Begin(false)
 	if err != nil {
@@ -102,11 +123,72 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 	}
 	defer tx.Rollback()
 
-	bkId := tx.Bucket([]byte(db.Namespace))
 	bkIndex := tx.Bucket([]byte(db.Namespace + "index"))
-	if bkId == nil || bkIndex == nil {
+	if bkIndex == nil {
 		return
 	}
+
+MORE:
+	db.marchSearch(tx, chars, segs, start, n, metrics, func(key []byte) bool {
+		if len(res) >= n {
+			res = res[:n]
+			next = append([]byte(nil), key...)
+			return false
+		}
+
+		indexBuf := key[4:]
+		index, _ := SortedUvarint(indexBuf)
+		score := binary.BigEndian.Uint32(key[:4])
+		docId := bkIndex.Get(indexBuf)
+
+		res = append(res, Document{
+			Index: index,
+			ID:    append([]byte(nil), docId...),
+			Score: score,
+		})
+		return true
+	})
+
+	if len(res) > 0 && len(charsEx) > 0 {
+		for _, ex := range charsEx {
+			if len(res) == 0 {
+				break
+			}
+			last := res[len(res)-1]
+			boundKey := AppendSortedUvarint(binary.BigEndian.AppendUint32(nil, last.Score), last.Index)
+			db.marchSearch(tx, ex, [][2]int{{0, len(ex)}}, start, n, metrics, func(key []byte) bool {
+				if bytes.Compare(key, boundKey) < 0 {
+					return false
+				}
+				indexBuf := key[4:]
+				index, _ := SortedUvarint(indexBuf)
+				for i := len(res) - 1; i >= 0; i-- {
+					if res[i].Index == index {
+						res = append(res[:i], res[i+1:]...)
+						break
+					}
+				}
+				return true
+			})
+		}
+
+		if metrics.Query == "-0" {
+			fmt.Println(111, res)
+		}
+
+		if len(res) < n && len(next) > 0 {
+			start = next
+			next = nil
+			goto MORE
+		}
+	}
+
+	return
+}
+
+func (db *DB) marchSearch(tx *bbolt.Tx, chars []rune, segs [][2]int,
+	start []byte, n int, metrics *SearchMetrics, f func([]byte) bool) {
+	cursors := make([]*cursor, len(chars))
 
 	for i, r := range chars {
 		bk := tx.Bucket(binary.BigEndian.AppendUint32([]byte(db.Namespace), uint32(r)))
@@ -175,12 +257,6 @@ SWITCH_HEAD:
 			continue SWITCH_HEAD
 		}
 
-		// 	for i, c := range cursors {
-		// 		array16.Foreach(c.value, func(pos uint16) bool {
-		// 			fmt.Println(string(chars[i]), pos)
-		// 			return true
-		// 		})
-		// 	}
 		metrics.Scan++
 
 		match := false
@@ -203,20 +279,9 @@ SWITCH_HEAD:
 		}
 
 		if match {
-			if len(res) >= n {
-				return res[:n], append([]byte(nil), cursors[0].key...)
+			if !f(cursors[0].key) {
+				return
 			}
-
-			indexBuf := cursors[0].key[4:]
-			index, _ := SortedUvarint(indexBuf)
-			score := binary.BigEndian.Uint32(cursors[0].key[:4])
-			docId := bkIndex.Get(indexBuf)
-
-			res = append(res, Document{
-				Index: index,
-				ID:    append([]byte(nil), docId...),
-				Score: score,
-			})
 		}
 
 		head.key, head.value = head.Prev()

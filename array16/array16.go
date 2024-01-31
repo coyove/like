@@ -1,7 +1,9 @@
 package array16
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 )
 
@@ -216,4 +218,14 @@ func uvarint(buf []byte) (uint64, int) {
 		}
 	}
 	return 0, 0
+}
+
+func Stringify(v []byte) string {
+	p := bytes.NewBufferString("[")
+	Foreach(v, func(pos uint16) bool {
+		fmt.Fprintf(p, "%d ", pos)
+		return true
+	})
+	buf := append(bytes.TrimSpace(p.Bytes()), ']')
+	return string(buf)
 }

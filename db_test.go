@@ -6,22 +6,17 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 	"unsafe"
-
-	"github.com/coyove/bbolt"
 )
 
 var db DB
 
 func init() {
-	db.Store, _ = bbolt.Open("fts.db", 0644, &bbolt.Options{
-		FreelistType: bbolt.FreelistMapType,
-		NoSync:       true,
-	})
+	db.OpenDefault("fts.db")
 	db.Namespace = "test"
-	db.MaxChars = 50000
 }
 
 func saveContent(id string, data []byte) {
@@ -139,6 +134,92 @@ func TestFillWikiContent(t *testing.T) {
 	}
 }
 
+func TestAuto(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.db")
+	os.Remove(path)
+	defer os.Remove(path)
+
+	var db DB
+	db.OpenDefault(path)
+	db.Namespace = "test"
+	defer db.Store.Close()
+
+	var m *SearchMetrics
+	var N = 10
+	var res []Document
+	var start, next []byte
+	search := func(q string) {
+		m = &SearchMetrics{}
+		res, next = db.Search(q, start, N, m)
+	}
+
+	db.Index(IndexDocument{Content: "abcdefg", Score: 1}.SetIntID(1))
+	search("cdef")
+	if len(res) == 0 || res[0].IntID() != 1 || res[0].Score != 1 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Content: "abcefg"}.SetIntID(1))
+	search("cdef")
+	if len(res) != 0 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Score: 100, Rescore: true}.SetIntID(1))
+	search("cef")
+	if len(res) == 0 || res[0].IntID() != 1 || res[0].Score != 100 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Content: "efg abc"}.SetIntID(2))
+	search("efg abc")
+	if len(res) != 2 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Score: 200, Rescore: true}.SetIntID(2))
+	search("\"efg abc\"")
+	if len(res) != 1 || res[0].IntID() != 2 || res[0].Score != 200 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Content: "can't"}.SetIntID(3))
+	search("can't")
+	if hl := m.Highlight("can't", "<", ">"); hl != "<can't>" {
+		t.Fatal(hl)
+	}
+	search("can t")
+	if hl := m.Highlight("can't", "<", ">"); hl != "<can>'<t>" {
+		t.Fatal(hl)
+	}
+
+	for i, start, end := 0, 0, 20; i < end; i++ {
+		text := ""
+		for j := start; j < end; j++ {
+			if j != i {
+				text += fmt.Sprintf(" %d", j)
+			}
+		}
+		db.Index(IndexDocument{Content: text, Score: uint32(i + 1)}.SetIntID(uint64(i)))
+	}
+
+	N = 2
+	search("5 -\"5 6 7 8\"")
+	if len(res) != 2 || res[0].IntID() != 8 || res[1].IntID() != 7 {
+		t.Fatal(res)
+	}
+	start = next
+	search("5 -\"5 6 7 8\"")
+	if len(res) != 1 || res[0].IntID() != 6 || len(next) != 0 {
+		t.Fatal(res)
+	}
+	start = nil
+	search("0 -19")
+	if len(res) != 1 || res[0].IntID() != 19 {
+		t.Fatal(res)
+	}
+}
+
 func TestSearch(t *testing.T) {
 	var search string
 	// search = "康德"
@@ -147,8 +228,9 @@ func TestSearch(t *testing.T) {
 	// search = "玩 😌"
 	search = "中華職棒 一"
 	// search = "箔"
-	search = " world view"
-	search = "egg \"soup cans\" bread"
+	// search = " world view"
+	search = "-beef -water boil -milk \"soup cans\" -pepper"
+	// search = "hijklm"
 
 	dummy := func(id string, content string) {
 		db.Index(IndexDocument{
@@ -160,6 +242,8 @@ func TestSearch(t *testing.T) {
 	dummy("100001", "world is my home")
 	dummy("100002", "abcdefghijklmnopqrstuvwxyz")
 	dummy("100003", "不像我都不能跑步")
+
+	db.Index(IndexDocument{Score: uint32(time.Now().Unix()), Rescore: true}.SetStringID("100002"))
 
 	fmt.Println("=======")
 
@@ -188,7 +272,7 @@ func TestSearch(t *testing.T) {
 			fmt.Println(docs[i], "==", line)
 		}
 
-		fmt.Println("=======", m.Seek, m.SwitchHead, m.FastSwitchHead, m.Scan, m.Collected)
+		fmt.Println("=======", m)
 		if len(next) == 0 {
 			break
 		}

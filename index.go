@@ -16,9 +16,10 @@ const (
 
 type IndexDocument struct {
 	ID      []byte
+	Rescore bool
+	Order   byte
 	Score   uint32
 	Content string
-	Order   byte
 }
 
 func (d IndexDocument) SetID(v []byte) IndexDocument {
@@ -53,12 +54,19 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 
 	for _, doc := range docs {
 		chars, _ := Collect(doc.Content, db.MaxChars)
-		if len(doc.ID) == 0 || len(chars) == 0 {
+		if len(doc.ID) == 0 {
 			return fmt.Errorf("empty document")
 		}
-		// fmt.Println(chars)
+		if len(chars) == 0 && !doc.Rescore {
+			return fmt.Errorf("empty document")
+		}
 
-		bkId, index, oldExisted := deleteTx(tx, db.Namespace, doc.ID, "index")
+		if doc.Rescore {
+			deleteTx(tx, db.Namespace, doc.ID, "rescore", doc.Score)
+			continue
+		}
+
+		bkId, index, oldExisted := deleteTx(tx, db.Namespace, doc.ID, "index", 0)
 		if err != nil {
 			return err
 		}
@@ -122,11 +130,11 @@ func (db *DB) Delete(doc IndexDocument) error {
 	}
 	defer tx.Rollback()
 
-	deleteTx(tx, db.Namespace, doc.ID, "delete")
+	deleteTx(tx, db.Namespace, doc.ID, "delete", 0)
 	return tx.Commit()
 }
 
-func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, source string) (*bbolt.Bucket, uint64, bool) {
+func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32) (*bbolt.Bucket, uint64, bool) {
 	bkId, _ := tx.CreateBucketIfNotExists([]byte(ns))
 	bkIndex, _ := tx.CreateBucketIfNotExists([]byte(ns + "index"))
 	bkIndex.FillPercent = 0.95
@@ -144,14 +152,14 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, source string) (*bbolt.Bucket
 		oldScore = oldPayload[w : w+4 : w+4]
 		oldPayload = oldPayload[w+4:]
 	} else {
-		if source == "delete" {
+		if action == "delete" || action == "rescore" {
 			return nil, 0, false
 		}
 		index = bkId.Sequence()
 		bkId.SetSequence(bkId.Sequence() + 1)
 	}
 
-	if source == "delete" {
+	if action == "delete" {
 		bkIndex.Delete(AppendSortedUvarint(nil, index))
 		bkIndex.SetSequence(bkIndex.Sequence() - 1)
 		bkId.Delete(id8)
@@ -163,15 +171,24 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, source string) (*bbolt.Bucket
 	}
 
 	if len(oldPayload) > 0 {
+		work := func(v uint32) {
+			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], ns...), v)
+			bk := tx.Bucket(tmp)
+			if action == "rescore" {
+				prev, _ := bk.TestDelete(AppendSortedUvarint(oldScore, index))
+				bk.Put(AppendSortedUvarint(binary.BigEndian.AppendUint32(nil, rescore), index), prev)
+			} else {
+				bk.SetSequence(bk.Sequence() - 1)
+				bk.Delete(AppendSortedUvarint(oldScore, index))
+			}
+			deletes++
+		}
+
 		runes1Len, w := binary.Uvarint(oldPayload)
 		oldPayload = oldPayload[w:]
 
 		array16.ForeachFull(oldPayload[:runes1Len], func(r uint16) bool {
-			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], ns...), uint32(r))
-			bk := tx.Bucket(tmp)
-			bk.SetSequence(bk.Sequence() - 1)
-			bk.Delete(AppendSortedUvarint(oldScore, index))
-			deletes++
+			work(uint32(r))
 			return true
 		})
 
@@ -181,12 +198,17 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, source string) (*bbolt.Bucket
 
 		for i := 0; i < len(oldPayload[:runes2Len*3]); i += 3 {
 			r := uint32(oldPayload[i])<<16 + uint32(oldPayload[i+1])<<8 + uint32(oldPayload[i+2])
-			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], ns...), r+0x10000)
-			bk := tx.Bucket(tmp)
-			bk.SetSequence(bk.Sequence() - 1)
-			bk.Delete(AppendSortedUvarint(oldScore, index))
-			deletes++
+			work(r + 0x10000)
 		}
+	}
+
+	if action == "rescore" {
+		old := bkId.Get(id8)
+		index, w := SortedUvarint(old)
+		buf := AppendSortedUvarint(nil, index)
+		buf = binary.BigEndian.AppendUint32(buf, rescore)
+		buf = append(buf, old[w+4:]...)
+		bkId.Put(id8, buf)
 	}
 
 	return bkId, index, len(oldScore) > 0

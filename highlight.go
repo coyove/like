@@ -2,12 +2,15 @@ package like
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"unicode/utf8"
 )
 
 type SearchMetrics struct {
+	Query          string   `json:"query"`
 	Chars          [][]rune `json:"chars"`
+	CharsEx        [][]rune `json:"chars_exclude"`
 	Collected      []string `json:"collected"`
 	Error          string   `json:"error"`
 	Seek           int      `json:"seek"`
@@ -15,6 +18,11 @@ type SearchMetrics struct {
 	SwitchHead     int      `json:"switch_head"`
 	FastSwitchHead int      `json:"fast_switch_head"`
 	Miss           int      `json:"miss"`
+}
+
+func (d *SearchMetrics) String() string {
+	buf, _ := json.Marshal(d)
+	return string(buf)
 }
 
 func (d *SearchMetrics) Highlight(content string, left, right string) (out string) {
