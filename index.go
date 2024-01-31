@@ -8,11 +8,17 @@ import (
 	"github.com/coyove/like/array16"
 )
 
+const (
+	IndexOrderRandom byte = iota
+	IndexOrderIncr
+	IndexOrderDecr
+)
+
 type IndexDocument struct {
 	ID      []byte
 	Score   uint32
 	Content string
-	Incr    bool
+	Order   byte
 }
 
 func (d IndexDocument) SetID(v []byte) IndexDocument {
@@ -77,8 +83,13 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], db.Namespace...), k)
 			bk, _ := tx.CreateBucketIfNotExists(tmp)
 			bk.SetSequence(bk.Sequence() + 1)
-			if doc.Incr && !oldExisted { // this is a new document.
-				bk.FillPercent = 0.9
+			if !oldExisted { // this is a new document
+				switch doc.Order {
+				case IndexOrderIncr:
+					bk.FillPercent = 0.9
+				case IndexOrderDecr:
+					bk.FillPercent = 0.1
+				}
 			}
 			bk.Put(AppendSortedUvarint(newScore, index), v)
 		}
