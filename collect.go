@@ -118,17 +118,6 @@ func Collect(source string, maxRunes uint16) (map[rune][]byte, bool) {
 	return res, full
 }
 
-func CollectChars(source string, maxRunes uint16) (res []rune) {
-	CollectFunc(source, func(i int, off [2]int, r rune, gram []rune) bool {
-		if i >= int(maxRunes) {
-			return false
-		}
-		res = append(res, r)
-		return true
-	})
-	return
-}
-
 func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 	if len(source) == 0 {
 		return

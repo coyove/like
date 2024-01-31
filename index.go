@@ -12,6 +12,7 @@ type IndexDocument struct {
 	ID      []byte
 	Score   uint32
 	Content string
+	Incr    bool
 }
 
 func (d IndexDocument) SetID(v []byte) IndexDocument {
@@ -76,7 +77,7 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], db.Namespace...), k)
 			bk, _ := tx.CreateBucketIfNotExists(tmp)
 			bk.SetSequence(bk.Sequence() + 1)
-			if !oldExisted { // this is a new document.
+			if doc.Incr && !oldExisted { // this is a new document.
 				bk.FillPercent = 0.9
 			}
 			bk.Put(AppendSortedUvarint(newScore, index), v)

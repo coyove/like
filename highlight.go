@@ -8,6 +8,7 @@ import (
 
 type SearchMetrics struct {
 	Chars          [][]rune `json:"chars"`
+	Collected      []string `json:"collected"`
 	Error          string   `json:"error"`
 	Seek           int      `json:"seek"`
 	Scan           int      `json:"scan"`

@@ -161,8 +161,6 @@ func TestSearch(t *testing.T) {
 	dummy("100002", "abcdefghijklmnopqrstuvwxyz")
 	dummy("100003", "不像我都不能跑步")
 
-	search = "不像 不能 跑步"
-
 	fmt.Println("=======")
 
 	var tot, hl time.Duration
@@ -190,7 +188,7 @@ func TestSearch(t *testing.T) {
 			fmt.Println(docs[i], "==", line)
 		}
 
-		fmt.Println("=======", m.Seek, m.SwitchHead, m.FastSwitchHead, m.Scan, m.Miss)
+		fmt.Println("=======", m.Seek, m.SwitchHead, m.FastSwitchHead, m.Scan, m.Collected)
 		if len(next) == 0 {
 			break
 		}

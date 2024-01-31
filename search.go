@@ -70,7 +70,20 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 		if left < 0 {
 			break
 		}
-		chars = append(chars, CollectChars(term, uint16(left))...)
+		CollectFunc(term, func(i int, off [2]int, r rune, gram []rune) bool {
+			if i >= left {
+				return false
+			}
+			chars = append(chars, r)
+			switch len(gram) {
+			case 2, 3:
+				metrics.Collected = append(metrics.Collected, string(gram))
+			default:
+				metrics.Collected = append(metrics.Collected, string(r))
+			}
+			return true
+		})
+
 		if len(chars) > old {
 			segs = append(segs, [2]int{old, len(chars) - old})
 			metrics.Chars = append(metrics.Chars, chars[old:])
