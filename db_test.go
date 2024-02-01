@@ -218,6 +218,23 @@ func TestAuto(t *testing.T) {
 	if len(res) != 1 || res[0].IntID() != 19 {
 		t.Fatal(res)
 	}
+
+	db.Index(IndexDocument{Content: "\u0E40\u0E14\u0E30\u0E17\u0E31\u0E01\u0E44\u0E1B\u0E1B"}.SetIntID(100))
+	db.Index(IndexDocument{Content: "\u0E40\u0E14\u0E30\u0E17\u0E01\u0E44\u0E1B\u0E1B\u0E31"}.SetIntID(101))
+	search("\u0E17\u0E31\u0E01")
+	if len(res) != 1 || res[0].IntID() != 100 {
+		t.Fatal(res)
+	}
+
+	search("\u0E30 \u0E01")
+	if len(res) != 2 {
+		t.Fatal(res)
+	}
+
+	search("\u0E17 \u0E01")
+	if len(res) != 1 || res[0].IntID() != 101 {
+		t.Fatal(res)
+	}
 }
 
 func TestSearch(t *testing.T) {

@@ -89,6 +89,15 @@ func isContinue(r rune) bool {
 	return 65536 <= r && r < 0xE0000
 }
 
+func hashGram(a []rune) rune {
+	tmp := make([]byte, len(a)*4)
+	for i, r := range a {
+		utf8.AppendRune(tmp[i*4:i*4], r)
+	}
+	h := crc32.ChecksumIEEE(tmp)
+	return rune(h&0xF0FFFF + 0xF0000)
+}
+
 func hashTrigram(a, b, c rune) rune {
 	var tmp [12]byte
 	utf8.AppendRune(tmp[:0], a)
@@ -174,6 +183,28 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 					i++
 				}
 				continue
+			}
+		}
+
+		if len(grams) == 0 {
+			grams = append(grams[:0], r)
+			width := w
+			for off < len(source) {
+				r, w := utf8.DecodeRuneInString(source[off:])
+				if r == utf8.RuneError {
+					break
+				}
+				// TODO: ZWJ?
+				if !unicode.Is(unicode.Mn, r) {
+					break
+				}
+				grams = append(grams, r)
+				width += w
+				off += w
+			}
+			if len(grams) > 1 {
+				r = rune(hashGram(grams))
+				prevOff[1] = width
 			}
 		}
 
