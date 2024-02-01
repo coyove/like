@@ -259,26 +259,27 @@ SWITCH_HEAD:
 
 		metrics.Scan++
 
+		var tmp [][]byte
 		match := false
 		for _, seg := range segs {
 			start, length := seg[0], seg[1]
 			cc := cursors[start : start+length]
-			array16.Foreach(cc[0].value, func(pos uint16) bool {
-				match = false
-				for i := 1; i < len(cc); i++ {
-					idx, ok := array16.Contains(cc[i].value, uint16(i)+pos)
-					if !ok {
-						if idx < len(cc[i].value) {
-							cc[i].value = cc[i].value[idx:]
-						}
-						metrics.Miss++
-						return true
-					}
-					cc[i].value = cc[i].value[idx:]
-				}
-				match = true
-				return false
-			})
+			for i := 1; i < len(cc); i++ {
+				tmp = append(tmp, cc[i].value)
+			}
+			_, match = array16.FindConsecutiveValues(cc[0].value, tmp)
+			// array16.Foreach(cc[0].value, func(pos uint16) bool {
+			// 	match = false
+			// 	for i := 1; i < len(cc); i++ {
+			// 		_, ok := array16.Contains(cc[i].value, uint16(i)+pos)
+			// 		if !ok {
+			// 			metrics.Miss++
+			// 			return true
+			// 		}
+			// 	}
+			// 	match = true
+			// 	return false
+			// })
 			if !match {
 				break
 			}

@@ -72,7 +72,7 @@ func compressSize(a []uint16, block int) (res []byte) {
 	return final
 }
 
-func Contains(a []byte, v uint16) (int, bool) {
+func Contains(a []byte, v uint16) (Reader, bool) {
 	i := 0
 	j := len(a) / blockSize
 	if j*blockSize < len(a) {
@@ -89,37 +89,70 @@ func Contains(a []byte, v uint16) (int, bool) {
 	}
 	i *= blockSize
 	if i < len(a) {
-		if head, _ := binary.Uvarint(a[i:]); uint16(head) == v {
-			return i, true
+		r := Reader{Data: a[i:]}
+		if head, ok := r.Next(); ok && uint16(head) == v {
+			return r, true
 		}
 	}
 
 	i -= blockSize
-	if i >= 0 && i < len(a) {
-		end := i + blockSize
-		if end > len(a) {
-			end = len(a) // the last block may be shorter then 'block' bytes
-		}
-		r := BlockReader{Data: a[i:end]}
-		for head, ok := r.Next(); ok; head, ok = r.Next() {
-			if head == v {
-				return i, true
-			}
-		}
-	}
 	if i < 0 {
-		i = 0
+		rn := Reader{Data: a}
+		rn.Next()
+		return rn, false
 	}
-	return i, false
+
+	end := i + blockSize
+	if end > len(a) {
+		end = len(a) // the last block may be shorter then 'block' bytes
+	}
+
+	r := Reader{Data: a[end:], br: BlockReader{Data: a[i:end]}}
+	for head, ok := r.Next(); ok; head, ok = r.Next() {
+		if head >= v {
+			return r, head == v
+		}
+	}
+	return r, false
 }
 
 type Reader struct {
 	Data []byte
-	bc   BlockReader
+	br   BlockReader
+}
+
+func (r *Reader) Forward(v uint16) {
+	if v <= r.br.Current {
+		return
+	}
+
+	for i := 0; i < 2; {
+		n, ok := r.Next()
+		if !ok {
+			return
+		}
+		if v <= n {
+			return
+		}
+		if len(r.br.Data) == 0 {
+			i++
+		}
+	}
+
+	// fmt.Println("-", r.Current(), v, r.br.Data, r.Data)
+
+	// Too many Next, use binary search.
+	*r, _ = Contains(r.Data, v)
+
+	// fmt.Println("+", r.Current(), v)
+}
+
+func (r *Reader) Current() uint16 {
+	return r.br.Current
 }
 
 func (r *Reader) Next() (uint16, bool) {
-	v, ok := r.bc.Next()
+	v, ok := r.br.Next()
 	if ok || len(r.Data) == 0 {
 		return v, ok
 	}
@@ -128,65 +161,65 @@ func (r *Reader) Next() (uint16, bool) {
 	if end > len(r.Data) {
 		end = len(r.Data)
 	}
-	r.bc = BlockReader{Data: r.Data[:end]}
+	r.br = BlockReader{Data: r.Data[:end]}
 	r.Data = r.Data[end:]
 	return r.Next()
 }
 
 type BlockReader struct {
-	Data  []byte
-	fired bool
-	pack  byte
-	head  uint16
+	Data    []byte
+	Current uint16
+	fired   bool
+	pack    byte
 }
 
-func (bc *BlockReader) Next() (uint16, bool) {
-	if len(bc.Data) == 0 {
+func (br *BlockReader) Next() (uint16, bool) {
+	if len(br.Data) == 0 {
 		return 0, false
 	}
 
-	if !bc.fired {
-		v, w := binary.Uvarint(bc.Data)
-		bc.Data = bc.Data[w:]
-		bc.head = uint16(v)
-		bc.fired = true
+	if !br.fired {
+		v, w := binary.Uvarint(br.Data)
+		br.Data = br.Data[w:]
+		br.Current = uint16(v)
+		br.fired = true
 		return uint16(v), true
 	}
 
-	x := bc.Data
+	x := br.Data
 	if x[0]>>7 == 0 {
 		next, w := uvarint(x)
 		if w <= 0 {
 			// End
 			return 0, false
 		}
-		bc.Data = bc.Data[w:]
-		bc.head += uint16(next)
-		return bc.head, true
+		br.Data = br.Data[w:]
+		br.Current += uint16(next)
+		return br.Current, true
 	}
 
 	if x[0]>>6 == 2 { // 0b10, pack3
 		y := binary.BigEndian.Uint32(x)
-		bc.head += uint16((y >> [...]int{20, 10, 0}[bc.pack]) & 0x3ff)
-		if bc.pack < 2 {
-			bc.pack++
+		br.Current += uint16((y >> [...]int{20, 10, 0}[br.pack]) & 0x3ff)
+		if br.pack < 2 {
+			br.pack++
 		} else {
-			bc.pack = 0
-			bc.Data = bc.Data[4:]
+			br.pack = 0
+			br.Data = br.Data[4:]
 		}
-		return bc.head, true
+		return br.Current, true
 	}
 
 	// 0b11, pack5
 	y := binary.BigEndian.Uint32(x)
-	bc.head += uint16((y >> [...]int{24, 18, 12, 6, 0}[bc.pack]) & 0x3f)
-	if bc.pack < 4 {
-		bc.pack++
+	br.Current += uint16((y >> [...]int{24, 18, 12, 6, 0}[br.pack]) & 0x3f)
+	if br.pack < 4 {
+		br.pack++
 	} else {
-		bc.pack = 0
-		bc.Data = bc.Data[4:]
+		br.pack = 0
+		br.Data = br.Data[4:]
 	}
-	return bc.head, true
+	return br.Current, true
 }
 
 func appendUvarint(buf []byte, x uint64) []byte {
@@ -203,25 +236,25 @@ func appendUvarint(buf []byte, x uint64) []byte {
 }
 
 func uvarint(buf []byte) (uint64, int) {
-	var x uint64
-	var s uint
-	for i, b := range buf {
-		if i == 10 {
-			return 0, -(i + 1)
-		}
-		if i == 0 {
-			x |= uint64(b & 0x3f)
-			if b >= 0x40 {
-				return x, i + 1
-			}
-			s = 6
-		} else {
-			x |= uint64(b&0x7f) << s
-			if b >= 0x80 {
-				return x, i + 1
-			}
-			s += 7
-		}
+	if len(buf) == 0 {
+		return 0, 0
 	}
-	return 0, 0
+
+	b := buf[0]
+	x := uint64(b & 0x3f)
+	if b >= 0x40 {
+		return x, 1
+	}
+	s := 6
+
+	for i := 1; i < len(buf); i++ {
+		b := buf[i]
+		x |= uint64(b&0x7f) << s
+		if b >= 0x80 {
+			return x, i + 1
+		}
+		s += 7
+	}
+
+	return 0, -1
 }
