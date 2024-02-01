@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unsafe"
@@ -45,6 +46,7 @@ func (d Document) String() string {
 type cursor struct {
 	*bbolt.Cursor
 	key, value []byte
+	index      int
 }
 
 func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) (res []Document, next []byte) {
@@ -200,7 +202,13 @@ func (db *DB) marchSearch(tx *bbolt.Tx, chars []rune, segs [][2]int,
 		if len(start) > 0 {
 			k, v = c.Seek(start)
 		}
-		cursors[i] = &cursor{c, k, v}
+		cursors[i] = &cursor{c, k, v, 0}
+	}
+
+	for _, seg := range segs {
+		for i := seg[0]; i < seg[0]+seg[1]; i++ {
+			cursors[i].index = i - seg[0]
+		}
 	}
 
 SWITCH_HEAD:
@@ -262,19 +270,20 @@ SWITCH_HEAD:
 		match := false
 		for _, seg := range segs {
 			start, length := seg[0], seg[1]
+
 			cc := cursors[start : start+length]
+			sort.Slice(cc, func(i, j int) bool {
+				return len(cc[i].value) < len(cc[j].value)
+			})
+
 			array16.Foreach(cc[0].value, func(pos uint16) bool {
 				match = false
 				for i := 1; i < len(cc); i++ {
-					idx, ok := array16.Contains(cc[i].value, uint16(i)+pos)
+					_, ok := array16.Contains(cc[i].value, uint16(int(pos)-cc[0].index+cc[i].index))
 					if !ok {
-						if idx < len(cc[i].value) {
-							cc[i].value = cc[i].value[idx:]
-						}
 						metrics.Miss++
 						return true
 					}
-					cc[i].value = cc[i].value[idx:]
 				}
 				match = true
 				return false
