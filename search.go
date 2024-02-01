@@ -262,13 +262,19 @@ SWITCH_HEAD:
 		match := false
 		for _, seg := range segs {
 			start, length := seg[0], seg[1]
-			array16.Foreach(cursors[start].value, func(pos uint16) bool {
+			cc := cursors[start : start+length]
+			array16.Foreach(cc[0].value, func(pos uint16) bool {
 				match = false
-				for i := start + 1; i < start+length; i++ {
-					if array16.Contains(cursors[i].value, uint16(i-start)+pos) == -1 {
+				for i := 1; i < len(cc); i++ {
+					idx, ok := array16.Contains(cc[i].value, uint16(i)+pos)
+					if !ok {
+						if idx < len(cc[i].value) {
+							cc[i].value = cc[i].value[idx:]
+						}
 						metrics.Miss++
 						return true
 					}
+					cc[i].value = cc[i].value[idx:]
 				}
 				match = true
 				return false
@@ -277,6 +283,8 @@ SWITCH_HEAD:
 				break
 			}
 		}
+
+		// === NOTE: cursors[*].value has been invalidated, don't use ===
 
 		if match {
 			if !f(cursors[0].key) {

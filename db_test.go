@@ -235,6 +235,9 @@ func TestAuto(t *testing.T) {
 	if len(res) != 1 || res[0].IntID() != 101 {
 		t.Fatal(res)
 	}
+
+	search("o\u0302o")
+	fmt.Println(m)
 }
 
 func TestSearch(t *testing.T) {

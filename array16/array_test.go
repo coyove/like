@@ -26,11 +26,11 @@ func TestFuzzy(t *testing.T) {
 		for i := 0; i < 65536; i++ {
 			v := uint16(i)
 			if dedup[v] {
-				if Contains(lk, v) == -1 {
+				if _, ok := Contains(lk, v); !ok {
 					t.Fatal(v)
 				}
 			} else {
-				if Contains(lk, v) != -1 {
+				if _, ok := Contains(lk, v); ok {
 					t.Fatal(v)
 				}
 			}
