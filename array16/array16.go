@@ -1,9 +1,7 @@
 package array16
 
 import (
-	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sort"
 )
 
@@ -102,16 +100,11 @@ func Contains(a []byte, v uint16) (int, bool) {
 		if end > len(a) {
 			end = len(a) // the last block may be shorter then 'block' bytes
 		}
-		found := false
-		ForeachFull(a[i:end], func(head uint16) bool {
+		r := BlockReader{Data: a[i:end]}
+		for head, ok := r.Next(); ok; head, ok = r.Next() {
 			if head == v {
-				found = true
-				return false
+				return i, true
 			}
-			return true
-		})
-		if found {
-			return i, true
 		}
 	}
 	if i < 0 {
@@ -120,70 +113,80 @@ func Contains(a []byte, v uint16) (int, bool) {
 	return i, false
 }
 
-func Foreach(a []byte, f func(v uint16) bool) {
-	for i := 0; i < len(a); i += blockSize {
-		end := i + blockSize
-		if end > len(a) {
-			end = len(a) // the last block may be shorter then 'block' bytes
-		}
-		if !ForeachFull(a[i:end], f) {
-			break
-		}
-	}
+type Reader struct {
+	Data []byte
+	bc   BlockReader
 }
 
-func Len(a []byte) (c int) {
-	for i := 0; i < len(a); i += blockSize {
-		end := i + blockSize
-		if end > len(a) {
-			end = len(a)
-		}
-		ForeachFull(a[i:end], func(uint16) bool { c++; return true })
+func (r *Reader) Next() (uint16, bool) {
+	v, ok := r.bc.Next()
+	if ok || len(r.Data) == 0 {
+		return v, ok
 	}
-	return
+
+	end := blockSize
+	if end > len(r.Data) {
+		end = len(r.Data)
+	}
+	r.bc = BlockReader{Data: r.Data[:end]}
+	r.Data = r.Data[end:]
+	return r.Next()
 }
 
-func ForeachFull(x []byte, f func(v uint16) bool) bool {
-	if len(x) == 0 {
-		return true
-	}
-	v, w := binary.Uvarint(x)
-	head := uint16(v)
-	if !f(head) {
-		return false
-	}
-	x = x[w:]
+type BlockReader struct {
+	Data  []byte
+	fired bool
+	pack  byte
+	head  uint16
+}
 
-	for len(x) > 0 {
-		if x[0]>>7 == 0 {
-			next, w := uvarint(x)
-			if w <= 0 {
-				break
-			}
-			head += uint16(next)
-			if !f(head) {
-				return false
-			}
-			x = x[w:]
-		} else if x[0]>>6 == 2 { // 0b10, pack3
-			y := binary.BigEndian.Uint32(x)
-			for _, a := range [3]uint32{(y >> 20) & 0x3ff, (y >> 10) & 0x3ff, (y) & 0x3ff} {
-				if head += uint16(a); !f(head) {
-					return false
-				}
-			}
-			x = x[4:]
-		} else { // 0b11, pack5
-			y := binary.BigEndian.Uint32(x)
-			for _, a := range [5]uint32{(y >> 24) & 0x3f, (y >> 18) & 0x3f, (y >> 12) & 0x3f, (y >> 6) & 0x3f, (y) & 0x3f} {
-				if head += uint16(a); !f(head) {
-					return false
-				}
-			}
-			x = x[4:]
-		}
+func (bc *BlockReader) Next() (uint16, bool) {
+	if len(bc.Data) == 0 {
+		return 0, false
 	}
-	return true
+
+	if !bc.fired {
+		v, w := binary.Uvarint(bc.Data)
+		bc.Data = bc.Data[w:]
+		bc.head = uint16(v)
+		bc.fired = true
+		return uint16(v), true
+	}
+
+	x := bc.Data
+	if x[0]>>7 == 0 {
+		next, w := uvarint(x)
+		if w <= 0 {
+			// End
+			return 0, false
+		}
+		bc.Data = bc.Data[w:]
+		bc.head += uint16(next)
+		return bc.head, true
+	}
+
+	if x[0]>>6 == 2 { // 0b10, pack3
+		y := binary.BigEndian.Uint32(x)
+		bc.head += uint16((y >> [...]int{20, 10, 0}[bc.pack]) & 0x3ff)
+		if bc.pack < 2 {
+			bc.pack++
+		} else {
+			bc.pack = 0
+			bc.Data = bc.Data[4:]
+		}
+		return bc.head, true
+	}
+
+	// 0b11, pack5
+	y := binary.BigEndian.Uint32(x)
+	bc.head += uint16((y >> [...]int{24, 18, 12, 6, 0}[bc.pack]) & 0x3f)
+	if bc.pack < 4 {
+		bc.pack++
+	} else {
+		bc.pack = 0
+		bc.Data = bc.Data[4:]
+	}
+	return bc.head, true
 }
 
 func appendUvarint(buf []byte, x uint64) []byte {
@@ -221,14 +224,4 @@ func uvarint(buf []byte) (uint64, int) {
 		}
 	}
 	return 0, 0
-}
-
-func Stringify(v []byte) string {
-	p := bytes.NewBufferString("[")
-	Foreach(v, func(pos uint16) bool {
-		fmt.Fprintf(p, "%d ", pos)
-		return true
-	})
-	buf := append(bytes.TrimSpace(p.Bytes()), ']')
-	return string(buf)
 }

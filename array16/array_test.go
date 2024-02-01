@@ -37,7 +37,7 @@ func TestFuzzy(t *testing.T) {
 		}
 
 		c := 0
-		ForeachFull(CompressFull(v), func(v uint16) bool {
+		ForeachBlock(CompressFull(v), func(v uint16) bool {
 			if !dedup[v] {
 				t.Fatal(v)
 			}

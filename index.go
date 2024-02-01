@@ -187,7 +187,7 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 		runes1Len, w := binary.Uvarint(oldPayload)
 		oldPayload = oldPayload[w:]
 
-		array16.ForeachFull(oldPayload[:runes1Len], func(r uint16) bool {
+		array16.ForeachBlock(oldPayload[:runes1Len], func(r uint16) bool {
 			work(uint32(r))
 			return true
 		})
