@@ -45,7 +45,7 @@ var continueBMP1Fast, letterBMP1Fast = func() (cont, letter [65536 / 8]byte) {
 		if id_continue(rune(i)) {
 			cont[i/8] |= 1 << (i % 8)
 		}
-		if isLetterNotCJK(rune(i)) {
+		if isNonLogoLetter(rune(i)) {
 			letter[i/8] |= 1 << (i % 8)
 		}
 	}
@@ -65,18 +65,11 @@ func normalize(r rune) rune {
 	return unicode.ToLower(nr)
 }
 
-func isLetterNotCJK(r rune) bool {
-	if unicode.IsNumber(r) {
-		return true
-	}
-	return unicode.IsLetter(r) && !unicode.Is(unicode.Lo, r)
-}
-
-func convertLetter(r rune) rune {
+func convertNonLogoLetter(r rune) rune {
 	if r < 65536 && letterBMP1Fast[r/8]&(1<<(r%8)) > 0 {
 		return normalize(r)
 	}
-	if isLetterNotCJK(r) {
+	if isNonLogoLetter(r) {
 		return normalize(r)
 	}
 	return 0
@@ -87,15 +80,6 @@ func isContinue(r rune) bool {
 		return true
 	}
 	return 65536 <= r && r < 0xE0000
-}
-
-func hashGram(a []rune) rune {
-	tmp := make([]byte, len(a)*4)
-	for i, r := range a {
-		utf8.AppendRune(tmp[i*4:i*4], r)
-	}
-	h := crc32.ChecksumIEEE(tmp)
-	return rune(h&0xF0FFFF + 0xF0000)
 }
 
 func hashTrigram(a, b, c rune) rune {
@@ -151,17 +135,22 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 
 		grams = grams[:0]
 
-		if r2 := convertLetter(r); r2 > 0 {
+		if r2 := convertNonLogoLetter(r); r2 > 0 {
 			grams = append(grams[:0], r2)
 			offs = append(offs[:0], prevOff)
 			for {
 				r, w := utf8.DecodeRuneInString(source[off:])
-				r = convertLetter(r)
-				if r == 0 {
-					break
+				cr := convertNonLogoLetter(r)
+				if cr == 0 {
+					if r == 0x200D || unicode.Is(unicode.Mn, r) {
+						// ZWJ & Mark nonspacing after letters should be considered.
+						cr = r
+					} else {
+						break
+					}
 				}
 				offs = append(offs, [2]int{off, w})
-				grams = append(grams, r)
+				grams = append(grams, cr)
 				off += w
 			}
 			switch len(grams) {
@@ -183,28 +172,6 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 					i++
 				}
 				continue
-			}
-		}
-
-		if len(grams) == 0 {
-			grams = append(grams[:0], r)
-			width := w
-			for off < len(source) {
-				r, w := utf8.DecodeRuneInString(source[off:])
-				if r == utf8.RuneError {
-					break
-				}
-				// TODO: ZWJ?
-				if !unicode.Is(unicode.Mn, r) {
-					break
-				}
-				grams = append(grams, r)
-				width += w
-				off += w
-			}
-			if len(grams) > 1 {
-				r = rune(hashGram(grams))
-				prevOff[1] = width
 			}
 		}
 

@@ -226,18 +226,11 @@ func TestAuto(t *testing.T) {
 		t.Fatal(res)
 	}
 
-	search("\u0E30 \u0E01")
-	if len(res) != 2 {
+	db.Index(IndexDocument{Content: "عايزه بنت اسألها على حاجه ضروري"}.SetIntID(200))
+	search("بنت")
+	if len(res) != 1 || res[0].IntID() != 200 {
 		t.Fatal(res)
 	}
-
-	search("\u0E17 \u0E01")
-	if len(res) != 1 || res[0].IntID() != 101 {
-		t.Fatal(res)
-	}
-
-	search("o\u0302o")
-	fmt.Println(m)
 }
 
 func TestSearch(t *testing.T) {

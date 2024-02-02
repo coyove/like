@@ -1,6 +1,6 @@
 module github.com/coyove/like
 
-go 1.21.5
+go 1.20
 
 require (
 	github.com/coyove/bbolt v1.3.9-0.20240131074955-c66fd7e27a99
