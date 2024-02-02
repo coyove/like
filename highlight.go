@@ -7,11 +7,12 @@ import (
 	"unicode/utf8"
 )
 
-type SearchMetrics struct {
+type Metrics struct {
 	Query          string   `json:"query"`
-	Chars          [][]rune `json:"chars"`
-	CharsEx        [][]rune `json:"chars_exclude"`
-	Collected      []string `json:"collected"`
+	Chars          [][]rune `json:"chars,omitempty"`
+	CharsEx        [][]rune `json:"chars_exclude,omitempty"`
+	CharsOr        [][]rune `json:"chars_or,omitempty"`
+	Collected      []string `json:"collected,omitempty"`
 	Error          string   `json:"error"`
 	Seek           int      `json:"seek"`
 	Scan           int      `json:"scan"`
@@ -20,12 +21,32 @@ type SearchMetrics struct {
 	Miss           int      `json:"miss"`
 }
 
-func (d *SearchMetrics) String() string {
+func (d *Metrics) Collect(term string, maxChars uint16) (parts []rune) {
+	CollectFunc(term, func(i int, off [2]int, r rune, gram []rune) bool {
+		if i >= int(maxChars) {
+			return false
+		}
+		parts = append(parts, r)
+		switch len(gram) {
+		case 2, 3:
+			d.Collected = append(d.Collected, string(gram))
+		default:
+			d.Collected = append(d.Collected, string(r))
+		}
+		return true
+	})
+	return
+}
+
+func (d *Metrics) String() string {
 	buf, _ := json.Marshal(d)
 	return string(buf)
 }
 
-func (d *SearchMetrics) Highlight(content string, left, right string) (out string) {
+func (d *Metrics) Highlight(content string, left, right string) (out string) {
+	if len(d.CharsOr) > 0 {
+		d.Chars = append(d.Chars, d.CharsOr...)
+	}
 	if len(d.Chars) == 0 {
 		return content
 	}

@@ -142,8 +142,8 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 				r, w := utf8.DecodeRuneInString(source[off:])
 				cr := convertNonLogoLetter(r)
 				if cr == 0 {
-					if r == 0x200D || unicode.Is(unicode.Mn, r) {
-						// ZWJ & Mark nonspacing after letters should be considered.
+					if r == 0x200D || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r) {
+						// ZWJ, Mn & Mc after letters should be considered.
 						cr = r
 					} else {
 						break

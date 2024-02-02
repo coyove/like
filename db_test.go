@@ -5,8 +5,10 @@ import (
 	"encoding/csv"
 	"encoding/xml"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 	"unsafe"
@@ -135,6 +137,8 @@ func TestFillWikiContent(t *testing.T) {
 }
 
 func TestAuto(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+
 	path := filepath.Join(os.TempDir(), "test.db")
 	os.Remove(path)
 	defer os.Remove(path)
@@ -144,12 +148,12 @@ func TestAuto(t *testing.T) {
 	db.Namespace = "test"
 	defer db.Store.Close()
 
-	var m *SearchMetrics
+	var m *Metrics
 	var N = 10
 	var res []Document
 	var start, next []byte
 	search := func(q string) {
-		m = &SearchMetrics{}
+		m = &Metrics{}
 		res, next = db.Search(q, start, N, m)
 	}
 
@@ -231,6 +235,59 @@ func TestAuto(t *testing.T) {
 	if len(res) != 1 || res[0].IntID() != 200 {
 		t.Fatal(res)
 	}
+
+	for i := 0; i < 120; i++ {
+		r := [...]int{2, 3, 5, 7}[i%4]
+		d := IndexDocument{Score: uint32(i), Content: "or"}
+		d.Content += " " + strconv.Itoa(i) + " "
+		for j := 0; j < 50; j++ {
+			if j%r == 0 {
+				d.Content += " " + strconv.Itoa(j)
+			}
+		}
+		// d = d.SetIntID(uint64(i))
+		d = d.SetStringID(strconv.Itoa(r) + " " + d.Content)
+		// 0 2 4 6 8 ... 98
+		// 0 3 6 9 ... 99
+		// 0 5 10 15 ... 95
+		// 0 7 14 21 ... 94
+		// ...
+		db.Index(d)
+	}
+
+	var docs []Document
+	for start, docs = nil, docs[:0]; ; {
+		N = rand.Intn(3) + 3
+		search("or 10|20|30")
+		docs = append(docs, res...)
+		if len(next) == 0 {
+			break
+		}
+		start = next
+	}
+	if len(docs) != 90 {
+		for _, doc := range docs {
+			fmt.Println(doc)
+		}
+		t.Fatal(len(docs))
+	}
+
+	for start, docs = nil, docs[:0]; ; {
+		N = rand.Intn(3) + 3
+		search("or 25|49 -102")
+		docs = append(docs, res...)
+		docs[len(docs)-1].Score += 10000
+		if len(next) == 0 {
+			break
+		}
+		start = next
+	}
+	if len(docs) != 60-1+2 {
+		for _, doc := range docs {
+			fmt.Println(doc)
+		}
+		t.Fatal(len(docs))
+	}
 }
 
 func TestSearch(t *testing.T) {
@@ -242,7 +299,7 @@ func TestSearch(t *testing.T) {
 	search = "中華職棒 一"
 	// search = "箔"
 	// search = " world view"
-	search = "-beef -water boil -milk \"soup cans\" -pepper"
+	search = "-beef -water boil -milk \"soup cans\""
 	// search = "hijklm"
 
 	dummy := func(id string, content string) {
@@ -262,7 +319,7 @@ func TestSearch(t *testing.T) {
 
 	var tot, hl time.Duration
 	for cursor := []byte(nil); ; {
-		m := &SearchMetrics{}
+		m := &Metrics{}
 		start := time.Now()
 		docs, next := db.Search(search, cursor, 5, m)
 		tot += time.Since(start)

@@ -3,44 +3,17 @@ package like
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sort"
 	"strings"
 	"unicode"
-	"unsafe"
 
 	"github.com/coyove/bbolt"
 	"github.com/coyove/like/array16"
 )
 
-type Document struct {
-	Index uint64
-	ID    []byte
-	Score uint32
-}
-
-func (d Document) IntID() (v uint64) {
-	if len(d.ID) == 8 {
-		return binary.BigEndian.Uint64(d.ID)
-	}
-	return 0
-}
-
-func (d Document) StringID() (v string) {
-	return *(*string)(unsafe.Pointer(&d.ID))
-}
-
-func (d Document) String() string {
-	p := "Document(#%d, %q"
-	for _, r := range *(*string)(unsafe.Pointer(&d.ID)) {
-		if !unicode.IsPrint(r) {
-			p = "Document(#%d, %x"
-			break
-		}
-	}
-	p = fmt.Sprintf(p, d.Index, d.ID)
-	p += fmt.Sprintf(", %d", d.Score)
-	return p + ")"
+type segchars struct {
+	chars []rune
+	segs  [][2]int
 }
 
 type cursor struct {
@@ -49,75 +22,134 @@ type cursor struct {
 	index      int
 }
 
-func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) (res []Document, next []byte) {
+func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res []Document, next []byte) {
 	if metrics == nil {
-		metrics = &SearchMetrics{}
+		metrics = &Metrics{}
 	}
 	metrics.Query = query
 
-	var chars []rune
-	var charsEx [][]rune
-	var segs [][2]int
+	var sc segchars
+	var charsEx []segchars
 
 	for query = strings.TrimSpace(query); len(query) > 0; {
-		var term string
 		var exclude bool
 		if query[0] == '-' {
 			exclude = true
 			query = query[1:]
 		}
-		if query[0] == '"' {
-			if q := strings.IndexByte(query[1:], '"'); q > -1 {
-				term = query[1 : 1+q]
-				query = query[1+q+1:]
-				goto OK
-			}
-		}
-		if i := strings.IndexFunc(query, unicode.IsSpace); i == -1 {
+
+		var term string
+		if q := strings.IndexByte(query[1:], '"'); q > -1 && query[0] == '"' {
+			// Quoted term.
+			term, query = query[1:1+q], query[1+q+1:]
+		} else if i := strings.IndexFunc(query, unicode.IsSpace); i == -1 {
+			// End of query.
 			term, query = query, ""
 		} else {
+			// Normal term.
 			term, query = query[:i], strings.TrimSpace(query[i+1:])
 		}
 
-	OK:
-		if len(term) == 0 {
-			continue
-		}
-
-		// Start collecting chars.
-		var parts []rune
-		CollectFunc(term, func(i int, off [2]int, r rune, gram []rune) bool {
-			if i >= int(db.MaxChars) {
-				return false
+		if terms := strings.Split(term, "|"); len(terms) > 1 {
+			if exclude {
+				metrics.Error = "mixed '|' and '-' operators"
+				return
 			}
-			parts = append(parts, r)
-			switch len(gram) {
-			case 2, 3:
-				metrics.Collected = append(metrics.Collected, string(gram))
-			default:
-				metrics.Collected = append(metrics.Collected, string(r))
+			if len(metrics.CharsOr) > 0 {
+				metrics.Error = "multiple '|' operators"
+				return
 			}
-			return true
-		})
 
-		if len(parts) == 0 {
-			continue
-		}
-
-		if exclude {
-			charsEx = append(charsEx, parts)
-			metrics.CharsEx = append(metrics.CharsEx, parts)
+			for _, term := range terms {
+				parts := metrics.Collect(term, db.MaxChars)
+				if len(parts) > 0 {
+					metrics.CharsOr = append(metrics.CharsOr, parts)
+				}
+			}
+			if len(metrics.CharsOr) <= 1 {
+				metrics.CharsOr = metrics.CharsOr[:0]
+			}
 		} else {
-			segs = append(segs, [2]int{len(chars), len(parts)})
-			chars = append(chars, parts...)
-			metrics.Chars = append(metrics.Chars, parts)
+			parts := metrics.Collect(term, db.MaxChars)
+			if len(parts) == 0 {
+				continue
+			}
+
+			if exclude {
+				charsEx = append(charsEx, segchars{parts, [][2]int{{0, len(parts)}}})
+				metrics.CharsEx = append(metrics.CharsEx, parts)
+			} else {
+				sc.segs = append(sc.segs, [2]int{len(sc.chars), len(parts)})
+				sc.chars = append(sc.chars, parts...)
+				metrics.Chars = append(metrics.Chars, parts)
+			}
 		}
 	}
 
-	if len(chars) == 0 {
-		return
+	if len(metrics.CharsOr) == 0 {
+		if len(sc.chars) == 0 {
+			return
+		}
+
+		return db.oneSearch(sc, charsEx, start, n, metrics)
 	}
 
+	// return db.multiSearch(sc, charsEx, start, n, metrics)
+	// 	for {
+	// 		docs, next := db.multiSearch(sc, charsEx, start, n, metrics)
+	// 		res = append(res, docs...)
+	// 		if len(res) < n {
+	// 			if len(next) == 0 {
+	// 				return res, next
+	// 			}
+	// 			start = next
+	// 			continue
+	// 		}
+	// 		if len(res) > n {
+	// 			next = res[n].boundKey(nil)
+	// 			res = res[:n]
+	// 		}
+	// 		return res, next
+	// 	}
+	// }
+	//
+	// func (db *DB) multiSearch(sc segchars, charsEx []segchars, start []byte, n int, metrics *Metrics) (docs []Document, next []byte) {
+	var docs []Document
+	for _, or := range metrics.CharsOr {
+		resA, nextA := db.oneSearch(segchars{
+			append(sc.chars, or...),
+			append(sc.segs, [2]int{len(sc.chars), len(or)}),
+		}, charsEx, start, n, metrics)
+
+		if bytes.Compare(nextA, next) > 0 {
+			next = nextA
+		}
+		docs = append(docs, resA...)
+	}
+
+	sort.Slice(docs, func(i, j int) bool {
+		if docs[i].Score == docs[j].Score {
+			return docs[i].Index > docs[j].Index
+		}
+		return docs[i].Score > docs[j].Score
+	})
+	for i := len(docs) - 1; i > 0; i-- {
+		if bytes.Equal(docs[i].ID, docs[i-1].ID) {
+			docs = append(docs[:i], docs[i+1:]...)
+		}
+	}
+
+	if len(docs) > n {
+		tmp := docs[n].boundKey(nil)
+		if bytes.Compare(tmp, next) > 0 {
+			next = tmp
+		}
+		docs = docs[:n]
+	}
+	return docs, next
+}
+
+func (db *DB) oneSearch(sc segchars, charsEx []segchars, start []byte, n int, metrics *Metrics) (res []Document, next []byte) {
 	tx, err := db.Store.Begin(false)
 	if err != nil {
 		metrics.Error = err.Error()
@@ -131,7 +163,7 @@ func (db *DB) Search(query string, start []byte, n int, metrics *SearchMetrics) 
 	}
 
 MORE:
-	db.marchSearch(tx, chars, segs, start, n, metrics, func(key []byte) bool {
+	db.marchSearch(tx, sc, start, metrics, func(key []byte) bool {
 		if len(res) >= n {
 			res = res[:n]
 			next = append([]byte(nil), key...)
@@ -156,26 +188,24 @@ MORE:
 			if len(res) == 0 {
 				break
 			}
-			last := res[len(res)-1]
-			boundKey := AppendSortedUvarint(binary.BigEndian.AppendUint32(nil, last.Score), last.Index)
-			db.marchSearch(tx, ex, [][2]int{{0, len(ex)}}, start, n, metrics, func(key []byte) bool {
+			boundKey := res[len(res)-1].boundKey(nil)
+			db.marchSearch(tx, ex, start, metrics, func(key []byte) bool {
 				if bytes.Compare(key, boundKey) < 0 {
 					return false
 				}
 				indexBuf := key[4:]
 				index, _ := SortedUvarint(indexBuf)
-				for i := len(res) - 1; i >= 0; i-- {
+				for i := range res {
 					if res[i].Index == index {
 						res = append(res[:i], res[i+1:]...)
 						break
 					}
 				}
+				if len(res) == 0 {
+					return false
+				}
 				return true
 			})
-		}
-
-		if metrics.Query == "-0" {
-			fmt.Println(111, res)
 		}
 
 		if len(res) < n && len(next) > 0 {
@@ -188,11 +218,10 @@ MORE:
 	return
 }
 
-func (db *DB) marchSearch(tx *bbolt.Tx, chars []rune, segs [][2]int,
-	start []byte, n int, metrics *SearchMetrics, f func([]byte) bool) {
-	cursors := make([]*cursor, len(chars))
+func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metrics, f func([]byte) bool) {
+	cursors := make([]*cursor, len(sc.chars))
 
-	for i, r := range chars {
+	for i, r := range sc.chars {
 		bk := tx.Bucket(binary.BigEndian.AppendUint32([]byte(db.Namespace), uint32(r)))
 		if bk == nil {
 			return
@@ -205,7 +234,7 @@ func (db *DB) marchSearch(tx *bbolt.Tx, chars []rune, segs [][2]int,
 		cursors[i] = &cursor{c, k, v, 0}
 	}
 
-	for _, seg := range segs {
+	for _, seg := range sc.segs {
 		for i := seg[0]; i < seg[0]+seg[1]; i++ {
 			cursors[i].index = i - seg[0]
 		}
@@ -268,7 +297,7 @@ SWITCH_HEAD:
 		metrics.Scan++
 
 		match := false
-		for _, seg := range segs {
+		for _, seg := range sc.segs {
 			start, length := seg[0], seg[1]
 
 			cc := cursors[start : start+length]
