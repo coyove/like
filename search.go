@@ -94,26 +94,6 @@ func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res [
 		return db.oneSearch(sc, charsEx, start, n, metrics)
 	}
 
-	// return db.multiSearch(sc, charsEx, start, n, metrics)
-	// 	for {
-	// 		docs, next := db.multiSearch(sc, charsEx, start, n, metrics)
-	// 		res = append(res, docs...)
-	// 		if len(res) < n {
-	// 			if len(next) == 0 {
-	// 				return res, next
-	// 			}
-	// 			start = next
-	// 			continue
-	// 		}
-	// 		if len(res) > n {
-	// 			next = res[n].boundKey(nil)
-	// 			res = res[:n]
-	// 		}
-	// 		return res, next
-	// 	}
-	// }
-	//
-	// func (db *DB) multiSearch(sc segchars, charsEx []segchars, start []byte, n int, metrics *Metrics) (docs []Document, next []byte) {
 	var docs []Document
 	for _, or := range metrics.CharsOr {
 		resA, nextA := db.oneSearch(segchars{
@@ -184,6 +164,7 @@ MORE:
 	})
 
 	if len(res) > 0 && len(charsEx) > 0 {
+		// fmt.Println("=========== START ", sc.chars, charsEx, start, res)
 		for _, ex := range charsEx {
 			if len(res) == 0 {
 				break
@@ -208,6 +189,7 @@ MORE:
 			})
 		}
 
+		// fmt.Println("=========== END ", res, n, next)
 		if len(res) < n && len(next) > 0 {
 			start = next
 			next = nil
@@ -227,9 +209,16 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 			return
 		}
 		c := bk.Cursor()
-		k, v := c.Last()
+		var k, v []byte
 		if len(start) > 0 {
 			k, v = c.Seek(start)
+			if len(k) == 0 {
+				k, v = c.Last()
+			} else if bytes.Compare(k, start) > 0 {
+				k, v = c.Prev()
+			}
+		} else {
+			k, v = c.Last()
 		}
 		cursors[i] = &cursor{c, k, v, 0}
 	}

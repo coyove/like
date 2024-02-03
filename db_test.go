@@ -19,6 +19,7 @@ var db DB
 func init() {
 	db.OpenDefault("fts.db")
 	db.Namespace = "test"
+	shortDocString = true
 }
 
 func saveContent(id string, data []byte) {
@@ -276,7 +277,6 @@ func TestAuto(t *testing.T) {
 		N = rand.Intn(3) + 3
 		search("or 25|49 -102")
 		docs = append(docs, res...)
-		docs[len(docs)-1].Score += 10000
 		if len(next) == 0 {
 			break
 		}

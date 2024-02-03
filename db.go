@@ -9,6 +9,8 @@ import (
 	"github.com/coyove/bbolt"
 )
 
+var shortDocString bool
+
 type DB struct {
 	Store     *bbolt.DB
 	Namespace string
@@ -46,6 +48,10 @@ func (d Document) StringID() (v string) {
 }
 
 func (d Document) String() string {
+	if shortDocString {
+		return fmt.Sprintf("#%d", d.Index)
+	}
+
 	p := "Document(#%d, %q"
 	for _, r := range *(*string)(unsafe.Pointer(&d.ID)) {
 		if !unicode.IsPrint(r) {
