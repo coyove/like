@@ -52,9 +52,16 @@ var continueBMP1Fast, letterBMP1Fast = func() (cont, letter [65536 / 8]byte) {
 	return
 }()
 
-var accent = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+func convertNonLogoLetter(accent transform.Transformer, r rune) rune {
+	if r < 65536 && letterBMP1Fast[r/8]&(1<<(r%8)) > 0 {
+		goto NORM
+	}
+	if isNonLogoLetter(r) {
+		goto NORM
+	}
+	return 0
 
-func normalize(r rune) rune {
+NORM:
 	var tmp [64]byte
 	n := utf8.EncodeRune(tmp[:], r)
 	output, _, e := transform.Append(accent, tmp[n:n], tmp[:n])
@@ -63,16 +70,6 @@ func normalize(r rune) rune {
 	}
 	nr, _ := utf8.DecodeRune(output)
 	return unicode.ToLower(nr)
-}
-
-func convertNonLogoLetter(r rune) rune {
-	if r < 65536 && letterBMP1Fast[r/8]&(1<<(r%8)) > 0 {
-		return normalize(r)
-	}
-	if isNonLogoLetter(r) {
-		return normalize(r)
-	}
-	return 0
 }
 
 func isContinue(r rune) bool {
@@ -119,6 +116,7 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 	var grams []rune
 	var offs [][2]int
 	var i int
+	var accent = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
 
 	for off := 0; off < len(source); {
 		r, w := utf8.DecodeRuneInString(source[off:])
@@ -135,12 +133,12 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 
 		grams = grams[:0]
 
-		if r2 := convertNonLogoLetter(r); r2 > 0 {
+		if r2 := convertNonLogoLetter(accent, r); r2 > 0 {
 			grams = append(grams[:0], r2)
 			offs = append(offs[:0], prevOff)
 			for {
 				r, w := utf8.DecodeRuneInString(source[off:])
-				cr := convertNonLogoLetter(r)
+				cr := convertNonLogoLetter(accent, r)
 				if cr == 0 {
 					if r == 0x200D || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r) {
 						// ZWJ, Mn & Mc after letters should be considered.
@@ -180,16 +178,4 @@ func CollectFunc(source string, f func(int, [2]int, rune, []rune) bool) {
 		}
 		i++
 	}
-}
-
-func runesHasPrefix(a []rune, prefix []rune) bool {
-	if len(a) < len(prefix) {
-		return false
-	}
-	for i := range prefix {
-		if prefix[i] != a[i] {
-			return false
-		}
-	}
-	return true
 }

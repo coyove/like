@@ -52,7 +52,10 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 			return fmt.Errorf("empty document ID")
 		}
 		if len(chars) == 0 && !doc.Rescore {
-			return fmt.Errorf("empty document")
+			if len(docs) == 1 {
+				return fmt.Errorf("empty document")
+			}
+			continue
 		}
 		if _, ok := chars[0]; ok {
 			panic("BUG")

@@ -43,7 +43,7 @@ func (d *Metrics) String() string {
 	return string(buf)
 }
 
-func (d *Metrics) Highlight(content string, left, right string) (out string) {
+func (d *Metrics) Highlight(content string, left, right string, expandhl int) (out string) {
 	if len(d.CharsOr) > 0 {
 		d.Chars = append(d.Chars, d.CharsOr...)
 	}
@@ -131,22 +131,33 @@ func (d *Metrics) Highlight(content string, left, right string) (out string) {
 		return true
 	})
 
-	const abbr = 60
+	p := bytes.Buffer{}
+	if expandhl == 0 {
+		start := 0
+		for _, s := range spans {
+			p.WriteString(content[start:s[0]])
+			p.WriteString(left)
+			p.WriteString(content[s[0]:s[1]])
+			p.WriteString(right)
+			start = s[1]
+		}
+		p.WriteString(content[start:])
+		return p.String()
+	}
 
 	for i := len(expands) - 1; i > 0; i-- {
-		if expands[i][0]-expands[i-1][1] < abbr*2+10 {
+		if expands[i][0]-expands[i-1][1] < expandhl*2+10 {
 			expands[i-1][1] = expands[i][1]
 			expands[i-1][3] = expands[i][3]
 			expands = append(expands[:i], expands[i+1:]...)
 		}
 	}
 
-	p := bytes.Buffer{}
 	eoc := false
 	for _, e := range expands {
 		start, end := e[0], e[1]
 		start0, end0 := e[0], e[1]
-		for start-start0 < abbr && start0 > 0 {
+		for start-start0 < expandhl && start0 > 0 {
 			r, w := utf8.DecodeLastRuneInString(content[:start0])
 			if r == utf8.RuneError {
 				break
@@ -154,7 +165,7 @@ func (d *Metrics) Highlight(content string, left, right string) (out string) {
 			start0 -= w
 		}
 
-		for end0-end < abbr && end0 < len(content) {
+		for end0-end < expandhl && end0 < len(content) {
 			r, w := utf8.DecodeRuneInString(content[end0:])
 			if r == utf8.RuneError {
 				break

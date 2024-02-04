@@ -331,3 +331,39 @@ SWITCH_HEAD:
 	}
 	return
 }
+
+type DocumentsMerger struct {
+	docs []Document
+	next []byte
+}
+
+func (dm *DocumentsMerger) Merge(docs []Document, next []byte) {
+	if bytes.Compare(next, dm.next) > 0 {
+		dm.next = next
+	}
+	dm.docs = append(dm.docs, docs...)
+}
+
+func (dm *DocumentsMerger) Result(n int) ([]Document, []byte) {
+	docs := dm.docs
+	sort.Slice(docs, func(i, j int) bool {
+		if docs[i].Score == docs[j].Score {
+			return docs[i].Index > docs[j].Index
+		}
+		return docs[i].Score > docs[j].Score
+	})
+	for i := len(docs) - 1; i > 0; i-- {
+		if bytes.Equal(docs[i].ID, docs[i-1].ID) {
+			docs = append(docs[:i], docs[i+1:]...)
+		}
+	}
+
+	if len(docs) > n {
+		tmp := docs[n].boundKey(nil)
+		if bytes.Compare(tmp, dm.next) > 0 {
+			dm.next = tmp
+		}
+		docs = docs[:n]
+	}
+	return docs, dm.next
+}

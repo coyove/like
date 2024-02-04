@@ -296,11 +296,11 @@ func TestAuto(t *testing.T) {
 
 	db.Index(IndexDocument{Content: "can't"}.SetIntID(3))
 	search("can't")
-	if hl := m.Highlight("can't", "<", ">"); hl != "<can't>" {
+	if hl := m.Highlight("can't", "<", ">", 0); hl != "<can't>" {
 		t.Fatal(hl)
 	}
 	search("can t")
-	if hl := m.Highlight("can't", "<", ">"); hl != "<can>'<t>" {
+	if hl := m.Highlight("can't", "<", ">", 0); hl != "<can>'<t>" {
 		t.Fatal(hl)
 	}
 
@@ -342,6 +342,8 @@ func TestAuto(t *testing.T) {
 	if len(res) != 1 || res[0].IntID() != 200 {
 		t.Fatal(res)
 	}
+	search("å")
+	fmt.Println(m)
 
 	for i := 0; i < 120; i++ {
 		r := [...]int{2, 3, 5, 7}[i%4]
@@ -405,7 +407,7 @@ func TestSearch(t *testing.T) {
 	search = "中華職棒 一"
 	// search = "箔"
 	// search = " world view"
-	search = "-beef -water boil -milk \"soup cans\""
+	search = "milk"
 	// search = "hijklm"
 
 	dummy := func(id string, content string) {
@@ -440,7 +442,7 @@ func TestSearch(t *testing.T) {
 			if x[i] == "" {
 				x[i] = string(docs[i].ID)
 			}
-			x[i] = m.Highlight(x[i], " <<<", ">>> ")
+			x[i] = m.Highlight(x[i], " <<<", ">>> ", 20)
 		}
 		hl += time.Since(start)
 
@@ -453,6 +455,7 @@ func TestSearch(t *testing.T) {
 			break
 		}
 		cursor = next
+		break
 	}
 	fmt.Println(tot, hl)
 
