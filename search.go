@@ -19,7 +19,6 @@ type segchars struct {
 type cursor struct {
 	*bbolt.Cursor
 	key, value []byte
-	index      int
 }
 
 func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res []Document, next []byte) {
@@ -31,7 +30,8 @@ func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res [
 	var sc segchars
 	var charsEx []segchars
 
-	for query = strings.TrimSpace(query); len(query) > 0; {
+	query = strings.TrimSpace(query)
+	for len(query) > 0 {
 		var exclude bool
 		if query[0] == '-' {
 			exclude = true
@@ -84,6 +84,11 @@ func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res [
 				metrics.Chars = append(metrics.Chars, parts)
 			}
 		}
+	}
+
+	if len(sc.chars) == 0 {
+		sc.chars = []rune{0}
+		sc.segs = [][2]int{{0, 1}}
 	}
 
 	if len(metrics.CharsOr) == 0 {
@@ -220,13 +225,19 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 		} else {
 			k, v = c.Last()
 		}
-		cursors[i] = &cursor{c, k, v, 0}
+		cursors[i] = &cursor{c, k, v}
 	}
 
-	for _, seg := range sc.segs {
-		for i := seg[0]; i < seg[0]+seg[1]; i++ {
-			cursors[i].index = i - seg[0]
+	if len(sc.chars) == 1 && sc.chars[0] == 0 {
+		c := cursors[0]
+		for len(c.key) > 0 {
+			metrics.Scan++
+			if !f(c.key) {
+				return
+			}
+			c.key, c.value = c.Prev()
 		}
+		return
 	}
 
 SWITCH_HEAD:
@@ -290,14 +301,11 @@ SWITCH_HEAD:
 			start, length := seg[0], seg[1]
 
 			cc := cursors[start : start+length]
-			sort.Slice(cc, func(i, j int) bool {
-				return len(cc[i].value) < len(cc[j].value)
-			})
 
 			array16.Foreach(cc[0].value, func(pos uint16) bool {
 				match = false
 				for i := 1; i < len(cc); i++ {
-					_, ok := array16.Contains(cc[i].value, uint16(int(pos)-cc[0].index+cc[i].index))
+					_, ok := array16.Contains(cc[i].value, uint16(int(pos)+i))
 					if !ok {
 						metrics.Miss++
 						return true

@@ -8,12 +8,6 @@ import (
 	"github.com/coyove/like/array16"
 )
 
-const (
-	IndexOrderRandom byte = iota
-	IndexOrderIncr
-	IndexOrderDecr
-)
-
 type IndexDocument struct {
 	ID      []byte
 	Rescore bool
@@ -55,10 +49,13 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 	for _, doc := range docs {
 		chars, _ := Collect(doc.Content, db.MaxChars)
 		if len(doc.ID) == 0 {
-			return fmt.Errorf("empty document")
+			return fmt.Errorf("empty document ID")
 		}
 		if len(chars) == 0 && !doc.Rescore {
 			return fmt.Errorf("empty document")
+		}
+		if _, ok := chars[0]; ok {
+			panic("BUG")
 		}
 
 		if doc.Rescore {
@@ -66,7 +63,7 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 			continue
 		}
 
-		bkId, index, oldExisted := deleteTx(tx, db.Namespace, doc.ID, "index", 0)
+		bkId, index := deleteTx(tx, db.Namespace, doc.ID, "index", 0)
 		if err != nil {
 			return err
 		}
@@ -78,6 +75,7 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 		var runes1 []uint16
 		var runes2 []uint32
 
+		chars[0] = nil
 		for k, v := range chars {
 			k := uint32(k)
 			if k < 0xFFFF {
@@ -91,14 +89,6 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], db.Namespace...), k)
 			bk, _ := tx.CreateBucketIfNotExists(tmp)
 			bk.SetSequence(bk.Sequence() + 1)
-			if !oldExisted { // this is a new document
-				switch doc.Order {
-				case IndexOrderIncr:
-					bk.FillPercent = 0.9
-				case IndexOrderDecr:
-					bk.FillPercent = 0.1
-				}
-			}
 			bk.Put(AppendSortedUvarint(newScore, index), v)
 		}
 
@@ -120,6 +110,23 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 		bkId.Put(doc.ID, payload)
 	}
 
+	if db.MaxDocs > 0 {
+		bkIndex, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "index"))
+		if diff := bkIndex.Sequence() - db.MaxDocs; diff > 0 {
+			var toDeletes [][]byte
+			bk := tx.Bucket([]byte(db.Namespace + "\x00\x00\x00\x00"))
+			c := bk.Cursor()
+			k, _ := c.First()
+			for i := 0; i < int(diff) && len(k) > 0; i++ {
+				toDeletes = append(toDeletes, bkIndex.Get(k[4:]))
+				k, _ = c.Next()
+			}
+			for _, d := range toDeletes {
+				deleteTx(tx, db.Namespace, d, "delete", 0)
+			}
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -134,10 +141,9 @@ func (db *DB) Delete(doc IndexDocument) error {
 	return tx.Commit()
 }
 
-func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32) (*bbolt.Bucket, uint64, bool) {
+func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32) (*bbolt.Bucket, uint64) {
 	bkId, _ := tx.CreateBucketIfNotExists([]byte(ns))
 	bkIndex, _ := tx.CreateBucketIfNotExists([]byte(ns + "index"))
-	bkIndex.FillPercent = 0.95
 
 	var tmp []byte
 	var deletes int
@@ -153,7 +159,7 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 		oldPayload = oldPayload[w+4:]
 	} else {
 		if action == "delete" || action == "rescore" {
-			return nil, 0, false
+			return nil, 0
 		}
 		index = bkId.Sequence()
 		bkId.SetSequence(bkId.Sequence() + 1)
@@ -166,6 +172,7 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 	} else {
 		bkIndex.Put(AppendSortedUvarint(nil, index), id8)
 		if len(oldPayload) == 0 { // new doc
+			bkIndex.FillPercent = 0.95
 			bkIndex.SetSequence(bkIndex.Sequence() + 1)
 		}
 	}
@@ -200,6 +207,8 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 			r := uint32(oldPayload[i])<<16 + uint32(oldPayload[i+1])<<8 + uint32(oldPayload[i+2])
 			work(r + 0x10000)
 		}
+
+		work(0)
 	}
 
 	if action == "rescore" {
@@ -211,10 +220,10 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 		bkId.Put(id8, buf)
 	}
 
-	return bkId, index, len(oldScore) > 0
+	return bkId, index
 }
 
-func (db *DB) Count() (int, int, error) {
+func (db *DB) Count() (total int, watermark int, err error) {
 	tx, err := db.Store.Begin(false)
 	if err != nil {
 		return 0, 0, err

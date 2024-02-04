@@ -137,16 +137,122 @@ func TestFillWikiContent(t *testing.T) {
 	}
 }
 
-func TestAuto(t *testing.T) {
+func createTemp() *DB {
 	rand.Seed(time.Now().Unix())
 
 	path := filepath.Join(os.TempDir(), "test.db")
 	os.Remove(path)
-	defer os.Remove(path)
 
 	var db DB
 	db.OpenDefault(path)
 	db.Namespace = "test"
+	return &db
+}
+
+func TestMaxDocs(t *testing.T) {
+	db := createTemp()
+	defer db.Store.Close()
+
+	db.MaxDocs = 10
+
+	for i := 0; i < 100; i++ {
+		db.Index(IndexDocument{Content: strconv.Itoa(i), Score: uint32(i)}.SetIntID(uint64(i)))
+	}
+
+	res, _ := db.Search("", nil, 20, nil)
+	if len(res) != 10 {
+		t.Fatal(len(res))
+	}
+	for i, doc := range res {
+		if doc.IntID() != uint64(99-i) {
+			t.Fatal(res)
+		}
+	}
+
+	m := map[int]int{}
+	low := 10000
+	for i := 90; i < 100; i++ {
+		if rand.Intn(2) == 1 {
+			db.Index(IndexDocument{Content: strconv.Itoa(i), Score: uint32(i)}.SetIntID(uint64(i)))
+			m[i] = i
+		} else {
+			s := i - rand.Intn(50)
+			db.Index(IndexDocument{Rescore: true, Score: uint32(s)}.SetIntID(uint64(i)))
+			m[i] = s
+			if s < low {
+				low = s
+			}
+		}
+	}
+
+	total, _, _ := db.Count()
+	if total != 10 {
+		t.Fatal(total)
+	}
+
+	m[100] = 100
+	db.Index(IndexDocument{Content: "100", Score: 100}.SetIntID(100))
+	for k, v := range m {
+		if v == low {
+			delete(m, k)
+		}
+	}
+
+	res, _ = db.Search("", nil, 20, nil)
+	if len(res) != 10 {
+		t.Fatal(len(res))
+	}
+	for _, doc := range res {
+		if doc.Score != uint32(m[int(doc.IntID())]) {
+			t.Fatal(res)
+		}
+	}
+	fmt.Println(res)
+}
+
+func TestChar0(t *testing.T) {
+	db := createTemp()
+	defer db.Store.Close()
+
+	db.Index(IndexDocument{Content: "a b c d e f", Score: 1}.SetIntID(1))
+	db.Index(IndexDocument{Content: "d e f g h i", Score: 2}.SetIntID(2))
+
+	res, _ := db.Search("", nil, 10, nil)
+	if len(res) != 2 || res[0].IntID() != 2 || res[1].IntID() != 1 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Content: "a b c d e g", Score: 3}.SetIntID(1))
+	res, _ = db.Search("", nil, 10, nil)
+	if len(res) != 2 || res[0].IntID() != 1 || res[1].IntID() != 2 {
+		t.Fatal(res)
+	}
+
+	db.Index(IndexDocument{Rescore: true, Score: 4}.SetIntID(2))
+	res, _ = db.Search("", nil, 10, nil)
+	if len(res) != 2 || res[0].IntID() != 2 || res[0].Score != 4 {
+		t.Fatal(res)
+	}
+
+	res, _ = db.Search("g -i", nil, 10, nil)
+	if len(res) != 1 || res[0].IntID() != 1 {
+		t.Fatal(res)
+	}
+
+	res, _ = db.Search("-i", nil, 10, nil)
+	if len(res) != 1 || res[0].IntID() != 1 {
+		t.Fatal(res)
+	}
+
+	db.Delete(IndexDocument{}.SetIntID(2))
+	res, _ = db.Search("", nil, 10, nil)
+	if len(res) != 1 || res[0].IntID() != 1 {
+		t.Fatal(res)
+	}
+}
+
+func TestAuto(t *testing.T) {
+	db := createTemp()
 	defer db.Store.Close()
 
 	var m *Metrics

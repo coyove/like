@@ -15,6 +15,7 @@ type DB struct {
 	Store     *bbolt.DB
 	Namespace string
 	MaxChars  uint16
+	MaxDocs   uint64
 }
 
 func (db *DB) OpenDefault(path string) (err error) {

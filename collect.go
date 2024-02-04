@@ -55,9 +55,9 @@ var continueBMP1Fast, letterBMP1Fast = func() (cont, letter [65536 / 8]byte) {
 var accent = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
 
 func normalize(r rune) rune {
-	var tmp [32]byte
+	var tmp [64]byte
 	n := utf8.EncodeRune(tmp[:], r)
-	output, _, e := transform.Append(accent, tmp[16:16], tmp[:n])
+	output, _, e := transform.Append(accent, tmp[n:n], tmp[:n])
 	if e != nil {
 		return unicode.ToLower(r)
 	}
