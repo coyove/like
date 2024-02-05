@@ -99,39 +99,14 @@ func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res [
 		return db.oneSearch(sc, charsEx, start, n, metrics)
 	}
 
-	var docs []Document
+	var dm DocumentsMerger
 	for _, or := range metrics.CharsOr {
-		resA, nextA := db.oneSearch(segchars{
+		dm.Merge(db.oneSearch(segchars{
 			append(sc.chars, or...),
 			append(sc.segs, [2]int{len(sc.chars), len(or)}),
-		}, charsEx, start, n, metrics)
-
-		if bytes.Compare(nextA, next) > 0 {
-			next = nextA
-		}
-		docs = append(docs, resA...)
+		}, charsEx, start, n, metrics))
 	}
-
-	sort.Slice(docs, func(i, j int) bool {
-		if docs[i].Score == docs[j].Score {
-			return docs[i].Index > docs[j].Index
-		}
-		return docs[i].Score > docs[j].Score
-	})
-	for i := len(docs) - 1; i > 0; i-- {
-		if bytes.Equal(docs[i].ID, docs[i-1].ID) {
-			docs = append(docs[:i], docs[i+1:]...)
-		}
-	}
-
-	if len(docs) > n {
-		tmp := docs[n].boundKey(nil)
-		if bytes.Compare(tmp, next) > 0 {
-			next = tmp
-		}
-		docs = docs[:n]
-	}
-	return docs, next
+	return dm.Peek(n)
 }
 
 func (db *DB) oneSearch(sc segchars, charsEx []segchars, start []byte, n int, metrics *Metrics) (res []Document, next []byte) {
@@ -344,7 +319,7 @@ func (dm *DocumentsMerger) Merge(docs []Document, next []byte) {
 	dm.docs = append(dm.docs, docs...)
 }
 
-func (dm *DocumentsMerger) Result(n int) ([]Document, []byte) {
+func (dm *DocumentsMerger) Peek(n int) ([]Document, []byte) {
 	docs := dm.docs
 	sort.Slice(docs, func(i, j int) bool {
 		if docs[i].Score == docs[j].Score {

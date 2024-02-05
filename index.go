@@ -175,7 +175,7 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 	} else {
 		bkIndex.Put(AppendSortedUvarint(nil, index), id8)
 		if len(oldPayload) == 0 { // new doc
-			bkIndex.FillPercent = 0.95
+			// bkIndex.FillPercent = 0.95
 			bkIndex.SetSequence(bkIndex.Sequence() + 1)
 		}
 	}
