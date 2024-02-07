@@ -11,7 +11,6 @@ import (
 type IndexDocument struct {
 	ID      []byte
 	Rescore bool
-	Order   byte
 	Score   uint32
 	Content string
 }
@@ -31,30 +30,44 @@ func (d IndexDocument) SetStringID(v string) IndexDocument {
 	return d
 }
 
-func (db *DB) Index(doc IndexDocument) error {
-	return db.BatchIndex([]IndexDocument{doc})
+func (d IndexDocument) String() string {
+	if d.Rescore {
+		return fmt.Sprintf("RescoreDocument(%x, %d)", d.ID, d.Score)
+	}
+	return fmt.Sprintf("IndexDocument(%x, %d, %db)", d.ID, d.Score, len(d.Content))
 }
 
-func (db *DB) BatchIndex(docs []IndexDocument) error {
+func (db *DB) Index(doc IndexDocument) error {
+	return db.BatchIndex([]IndexDocument{doc})[0]
+}
+
+func (db *DB) BatchIndex(docs []IndexDocument) []error {
 	if len(docs) == 0 {
 		return nil
 	}
 
+	errs := make([]error, len(docs))
 	tx, err := db.Store.Begin(true)
 	if err != nil {
-		return err
+		for i := range errs {
+			errs[i] = err
+		}
+		return errs
 	}
 	defer tx.Rollback()
 
-	for _, doc := range docs {
+	for i, doc := range docs {
 		chars, _ := Collect(doc.Content, db.MaxChars)
 		if len(doc.ID) == 0 {
-			return fmt.Errorf("empty document ID")
+			errs[i] = fmt.Errorf("empty document ID")
+			continue
+		}
+		if len(doc.ID) > bbolt.MaxKeySize {
+			errs[i] = fmt.Errorf("document ID too large")
+			continue
 		}
 		if len(chars) == 0 && !doc.Rescore {
-			if len(docs) == 1 {
-				return fmt.Errorf("empty document")
-			}
+			errs[i] = fmt.Errorf("empty document")
 			continue
 		}
 		if _, ok := chars[0]; ok {
@@ -67,14 +80,10 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 		}
 
 		bkId, index := deleteTx(tx, db.Namespace, doc.ID, "index", 0)
-		if err != nil {
-			return err
-		}
-
-		var tmp []byte
 
 		newScore := binary.BigEndian.AppendUint32(nil, doc.Score)
 
+		var tmp []byte
 		var runes1 []uint16
 		var runes2 []uint32
 
@@ -105,7 +114,8 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 		for _, k := range runes2 {
 			k -= 0x10000
 			if k > 0xFFFFFF {
-				return fmt.Errorf("invalid unicode %x", k+0x10000)
+				errs[i] = fmt.Errorf("invalid unicode %x", k+0x10000)
+				continue
 			}
 			payload = append(payload, byte(k>>16), byte(k>>8), byte(k))
 		}
@@ -130,7 +140,12 @@ func (db *DB) BatchIndex(docs []IndexDocument) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		for i := range errs {
+			errs[i] = err
+		}
+	}
+	return errs
 }
 
 func (db *DB) Delete(doc IndexDocument) error {
