@@ -8,17 +8,19 @@ import (
 )
 
 type Metrics struct {
-	Query          string   `json:"query"`
-	Chars          [][]rune `json:"chars,omitempty"`
-	CharsEx        [][]rune `json:"chars_exclude,omitempty"`
-	CharsOr        [][]rune `json:"chars_or,omitempty"`
-	Collected      []string `json:"collected,omitempty"`
-	Error          string   `json:"error"`
-	Seek           int      `json:"seek"`
-	Scan           int      `json:"scan"`
-	SwitchHead     int      `json:"switch_head"`
-	FastSwitchHead int      `json:"fast_switch_head"`
-	Miss           int      `json:"miss"`
+	Chars     [][]rune `json:"chars,omitempty"`
+	CharsEx   [][]rune `json:"chars_exclude,omitempty"`
+	CharsOr   [][]rune `json:"chars_or,omitempty"`
+	Collected []string `json:"collected,omitempty"`
+
+	Query          string `json:"query"`
+	Error          string `json:"error"`
+	Seek           int    `json:"seek"`
+	Scan           int    `json:"scan"`
+	SwitchHead     int    `json:"switch_head"`
+	FastSwitchHead int    `json:"fast_switch_head"`
+	Miss           int    `json:"miss"`
+	EstimatedCount int    `json:"estimated_count"`
 }
 
 func (d *Metrics) Collect(term string, maxChars uint16) (parts []rune) {

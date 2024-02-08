@@ -3,7 +3,7 @@ module github.com/coyove/like
 go 1.20
 
 require (
-	github.com/coyove/bbolt v1.3.9-0.20240206070950-2c43a30ecb8b
+	github.com/coyove/bbolt v1.3.9-0.20240208001744-5ec677dc8637
 	github.com/tidwall/gjson v1.17.0
 	go.etcd.io/bbolt v1.3.8
 	golang.org/x/text v0.14.0

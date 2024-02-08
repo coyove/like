@@ -201,6 +201,9 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 			k, v = c.Last()
 		}
 		cursors[i] = &cursor{c, k, v}
+		if i == 0 || int(c.Bucket().Sequence()) < metrics.EstimatedCount {
+			metrics.EstimatedCount = int(c.Bucket().Sequence())
+		}
 	}
 
 	if len(sc.chars) == 1 && sc.chars[0] == 0 {
@@ -212,6 +215,7 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 			}
 			c.key, c.value = c.Prev()
 		}
+		metrics.EstimatedCount = int(c.Bucket().Sequence())
 		return
 	}
 
@@ -298,11 +302,15 @@ SWITCH_HEAD:
 
 		if match {
 			if !f(cursors[0].key) {
-				return
+				break
 			}
 		}
 
 		head.key, head.value = head.Prev()
+	}
+
+	if matches > 0 {
+		metrics.EstimatedCount = metrics.EstimatedCount * matches / metrics.Scan
 	}
 	return
 }
