@@ -76,7 +76,7 @@ func isContinue(r rune) bool {
 	if r < 65536 && continueBMP1Fast[r/8]&(1<<(r%8)) > 0 {
 		return true
 	}
-	return 65536 <= r && r < 0xE0000
+	return 65536 <= r && r < 0xF0000
 }
 
 func hashTrigram(a, b, c rune) rune {

@@ -309,9 +309,9 @@ SWITCH_HEAD:
 		head.key, head.value = head.Prev()
 	}
 
-	if matches > 0 {
-		metrics.EstimatedCount = metrics.EstimatedCount * matches / metrics.Scan
-	}
+	// if matches > 0 {
+	// 	metrics.EstimatedCount = metrics.EstimatedCount * matches / metrics.Scan
+	// }
 	return
 }
 
