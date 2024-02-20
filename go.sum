@@ -8,6 +8,10 @@ github.com/coyove/bbolt v1.3.9-0.20240206070950-2c43a30ecb8b h1:UojsgGO86DFmzUVA
 github.com/coyove/bbolt v1.3.9-0.20240206070950-2c43a30ecb8b/go.mod h1:XpFeI1nakkDbuJ3peA8HArDMDBEjbOmnRrW2SBnNu/M=
 github.com/coyove/bbolt v1.3.9-0.20240208001744-5ec677dc8637 h1:jNFuEAgqlFIjYG89SlFRfbBXEiP1B0VnQSORK4eiaf4=
 github.com/coyove/bbolt v1.3.9-0.20240208001744-5ec677dc8637/go.mod h1:XpFeI1nakkDbuJ3peA8HArDMDBEjbOmnRrW2SBnNu/M=
+github.com/coyove/bbolt v1.3.9-0.20240218023119-12984dab25c2 h1:kqtGHJMsEs4uoz9rs1tAfQ8B59qgFj2WkVwaOd4b+cU=
+github.com/coyove/bbolt v1.3.9-0.20240218023119-12984dab25c2/go.mod h1:XpFeI1nakkDbuJ3peA8HArDMDBEjbOmnRrW2SBnNu/M=
+github.com/coyove/bbolt v1.3.9-0.20240219084319-ffb594d2e458 h1:SyLLFLHKKllG9ec+pUq5w7CfLab9yK/M+xbbHkzaKXs=
+github.com/coyove/bbolt v1.3.9-0.20240219084319-ffb594d2e458/go.mod h1:XpFeI1nakkDbuJ3peA8HArDMDBEjbOmnRrW2SBnNu/M=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

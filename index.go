@@ -123,19 +123,28 @@ func (db *DB) BatchIndex(docs []IndexDocument) []error {
 		bkId.Put(doc.ID, payload)
 	}
 
-	if db.MaxDocs > 0 {
+	if db.maxDocsTest > 0 {
 		bkIndex, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "index"))
-		if diff := bkIndex.Sequence() - db.MaxDocs; diff > 0 {
-			var toDeletes [][]byte
-			bk := tx.Bucket([]byte(db.Namespace + "\x00\x00\x00\x00"))
-			c := bk.Cursor()
-			k, _ := c.First()
-			for i := 0; i < int(diff) && len(k) > 0; i++ {
-				toDeletes = append(toDeletes, bkIndex.Get(k[4:]))
-				k, _ = c.Next()
+		if diff := bkIndex.Sequence() - db.maxDocsTest; diff > 0 {
+			db.evict(tx, int(diff))
+		}
+	}
+
+	if db.FreelistRange != [2]int{} {
+		stats := db.Store.Stats()
+		size := stats.FreePageN + stats.PendingPageN
+
+		if db.cfls > 0 {
+			if size > db.FreelistRange[1] {
+				db.cfls = 0
+			} else {
+				db.cfls = db.cfls/2 + len(docs)
+				db.evict(tx, db.cfls)
 			}
-			for _, d := range toDeletes {
-				deleteTx(tx, db.Namespace, d, "delete", 0)
+		} else {
+			if size < db.FreelistRange[0] {
+				db.cfls = len(docs) * 2
+				db.evict(tx, db.cfls)
 			}
 		}
 	}
@@ -256,31 +265,22 @@ func (db *DB) Count() (total int, watermark int, err error) {
 	return 0, 0, nil
 }
 
-func TopK(db *bbolt.DB, ns string, n int) {
-	tx, _ := db.Begin(false)
-	defer tx.Rollback()
+func (db *DB) evict(tx *bbolt.Tx, diff int) {
+	bkIndex, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "index"))
 
-	var h [][2]int32
-	c := tx.Cursor()
-	for k, _ := c.Seek(append([]byte(ns), 0)); len(k) > 0; k, _ = c.Next() {
-		r := rune(binary.BigEndian.Uint32(k[len(ns):]))
-		count := int32(tx.Bucket(k).Sequence())
-		h = append(h, [2]int32{int32(r), count})
-		if len(h) > n {
-			j := len(h) - 1
-			for {
-				i := (j - 1) / 2 // parent
-				if i == j || h[j][1] >= h[i][1] {
-					break
-				}
-				h[i], h[j] = h[j], h[i]
-				j = i
-			}
-			h = h[1:]
+	var toDeletes [][]byte
+	bk := tx.Bucket([]byte(db.Namespace + "\x00\x00\x00\x00"))
+	c := bk.Cursor()
+	k, _ := c.First()
+	for i := 0; i < int(diff) && len(k) > 0; i++ {
+		id := bkIndex.Get(k[4:])
+		if db.OnEvict != nil {
+			db.OnEvict(id)
 		}
+		toDeletes = append(toDeletes, id)
+		k, _ = c.Next()
 	}
-
-	for i := range h {
-		fmt.Println(string(rune(h[i][0])), h[i][1])
+	for _, d := range toDeletes {
+		deleteTx(tx, db.Namespace, d, "delete", 0)
 	}
 }

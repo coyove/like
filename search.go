@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/coyove/bbolt"
@@ -122,6 +123,11 @@ func (db *DB) oneSearch(sc segchars, charsEx []segchars, start []byte, n int, me
 		return
 	}
 
+	var ddl time.Time
+	if db.SearchTimeout > 0 {
+		ddl = time.Now().Add(db.SearchTimeout)
+	}
+
 MORE:
 	db.marchSearch(tx, sc, start, metrics, func(key []byte) bool {
 		if len(res) >= n {
@@ -141,7 +147,7 @@ MORE:
 			Score: score,
 		})
 		return true
-	})
+	}, ddl)
 
 	if len(res) > 0 && len(charsEx) > 0 {
 		// fmt.Println("=========== START ", sc.chars, charsEx, start, res)
@@ -166,7 +172,7 @@ MORE:
 					return false
 				}
 				return true
-			})
+			}, ddl)
 		}
 
 		// fmt.Println("=========== END ", res, n, next)
@@ -180,7 +186,7 @@ MORE:
 	return
 }
 
-func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metrics, f func([]byte) bool) {
+func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metrics, f func([]byte) bool, ddl time.Time) {
 	cursors := make([]*cursor, len(sc.chars))
 
 	for i, r := range sc.chars {
@@ -221,6 +227,11 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 
 SWITCH_HEAD:
 	for head := cursors[0]; len(head.key) > 0; {
+		if ddl != (time.Time{}) && time.Since(ddl) > 0 {
+			metrics.Timeout = true
+			break
+		}
+
 		for _, cur := range cursors {
 			cmp := bytes.Compare(cur.key, head.key)
 			if cmp == 0 {

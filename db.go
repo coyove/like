@@ -3,6 +3,7 @@ package like
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 	"unicode"
 	"unsafe"
 
@@ -12,10 +13,15 @@ import (
 var shortDocString bool
 
 type DB struct {
-	Store     *bbolt.DB
-	Namespace string
-	MaxChars  uint16
-	MaxDocs   uint64
+	Store         *bbolt.DB
+	Namespace     string
+	MaxChars      uint16
+	OnEvict       func([]byte)
+	SearchTimeout time.Duration
+	FreelistRange [2]int
+
+	maxDocsTest uint64
+	cfls        int
 }
 
 func (db *DB) OpenDefault(path string) (err error) {

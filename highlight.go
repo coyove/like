@@ -21,6 +21,7 @@ type Metrics struct {
 	FastSwitchHead int    `json:"fast_switch_head"`
 	Miss           int    `json:"miss"`
 	EstimatedCount int    `json:"estimated_count"`
+	Timeout        bool   `json:"timeout,omitempty"`
 }
 
 func (d *Metrics) Collect(term string, maxChars uint16) (parts []rune) {

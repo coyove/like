@@ -153,7 +153,7 @@ func TestMaxDocs(t *testing.T) {
 	db := createTemp()
 	defer db.Store.Close()
 
-	db.MaxDocs = 10
+	db.maxDocsTest = 10
 
 	for i := 0; i < 100; i++ {
 		db.Index(IndexDocument{Content: strconv.Itoa(i), Score: uint32(i)}.SetIntID(uint64(i)))
