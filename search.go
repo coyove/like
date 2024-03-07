@@ -188,7 +188,6 @@ MORE:
 
 func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metrics, f func([]byte) bool, ddl int64) {
 	cursors := make([]*cursor, len(sc.chars))
-	var cursorFewestItems *cursor
 
 	for i, r := range sc.chars {
 		bk := tx.Bucket(binary.BigEndian.AppendUint32([]byte(db.Namespace), uint32(r)))
@@ -210,7 +209,6 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 		cursors[i] = &cursor{c, k, v}
 		if i == 0 || int(c.Bucket().Sequence()) < metrics.EstimatedCount {
 			metrics.EstimatedCount = int(c.Bucket().Sequence())
-			cursorFewestItems = cursors[i]
 		}
 	}
 
@@ -227,7 +225,6 @@ func (db *DB) marchSearch(tx *bbolt.Tx, sc segchars, start []byte, metrics *Metr
 		return
 	}
 
-	var estiCountCalced bool
 	var matches, slowNow int
 
 SWITCH_HEAD:
@@ -320,22 +317,9 @@ SWITCH_HEAD:
 		// === NOTE: cursors[*].value has been invalidated, don't use ===
 
 		if match {
-			if !estiCountCalced {
-				dist, exact := cursorFewestItems.EstimatedDistance(cursorFewestItems.key, []byte{255, 255, 255, 255, 255}, 10000)
-				if exact {
-					if dist > 0 {
-						metrics.EstimatedCount = metrics.EstimatedCount / dist
-					}
-				} else {
-					metrics.EstimatedCount = -1
-				}
-				estiCountCalced = true
-			}
-
 			if !f(cursors[0].key) {
 				break
 			}
-
 			matches++
 		}
 
