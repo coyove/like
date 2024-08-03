@@ -8,10 +8,11 @@ import (
 )
 
 type Metrics struct {
-	Chars     [][]rune `json:"chars,omitempty"`
-	CharsEx   [][]rune `json:"chars_exclude,omitempty"`
-	CharsOr   [][]rune `json:"chars_or,omitempty"`
-	Collected []string `json:"collected,omitempty"`
+	Chars     []*segchars `json:"chars,omitempty"`
+	CharsEx   []*segchars `json:"chars_exclude,omitempty"`
+	Collected []string    `json:"collected,omitempty"`
+	FuzzyDist uint16      `json:"fuzzy_dist,omitempty"`
+	FuzzyMiss int         `json:"fuzzy_miss,omitempty"`
 
 	Query          string `json:"query"`
 	Error          string `json:"error"`
@@ -20,7 +21,6 @@ type Metrics struct {
 	SwitchHead     int    `json:"switch_head"`
 	FastSwitchHead int    `json:"fast_switch_head"`
 	Miss           int    `json:"miss"`
-	EstimatedCount int    `json:"estimated_count"`
 	Timeout        bool   `json:"timeout,omitempty"`
 }
 
@@ -47,9 +47,6 @@ func (d *Metrics) String() string {
 }
 
 func (d *Metrics) Highlight(content string, left, right string, expandhl int) (out string) {
-	if len(d.CharsOr) > 0 {
-		d.Chars = append(d.Chars, d.CharsOr...)
-	}
 	if len(d.Chars) == 0 {
 		return content
 	}
