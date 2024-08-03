@@ -29,11 +29,11 @@ func TestFuzzy(t *testing.T) {
 			start := SubSat(v, x)
 			end := AddSat(v, x)
 			if dedup[v] {
-				if !Contains(lk, start, end) {
+				if _, ok := Contains(lk, start, end); !ok {
 					t.Fatal(v)
 				}
 			} else {
-				if Contains(lk, v, v) {
+				if _, ok := Contains(lk, v, v); ok {
 					t.Fatal(v)
 				}
 			}
@@ -58,31 +58,31 @@ func TestFuzzy(t *testing.T) {
 func TestContainsRange(t *testing.T) {
 	v := []uint16{3, 5, 6, 7, 9, 11, 13, 150, 1700, 1900, 2100, 23000, 25000, 27000}
 	lk := Compress(v)
-	if !Contains(lk, 2100, 2100) {
+	if _, ok := Contains(lk, 2100, 2100); !ok {
 		t.Fatal(lk)
 	}
-	if Contains(lk, 2101, 2200) {
+	if _, ok := Contains(lk, 2101, 2200); ok {
 		t.Fatal(lk)
 	}
-	if !Contains(lk, 22888, 23000) {
+	if _, ok := Contains(lk, 22888, 23000); !ok {
 		t.Fatal(lk)
 	}
-	if !Contains(lk, 22888, 23001) {
+	if _, ok := Contains(lk, 22888, 23001); !ok {
 		t.Fatal(lk)
 	}
-	if Contains(lk, 27001, 65535) {
+	if _, ok := Contains(lk, 27001, 65535); ok {
 		t.Fatal(lk)
 	}
-	if !Contains(lk, 22888, 23000) {
+	if _, ok := Contains(lk, 22888, 23000); !ok {
 		t.Fatal(lk)
 	}
-	if !Contains(lk, 0, 4) {
+	if _, ok := Contains(lk, 0, 4); !ok {
 		t.Fatal(lk)
 	}
-	if Contains(lk, 0, 2) {
+	if _, ok := Contains(lk, 0, 2); ok {
 		t.Fatal(lk)
 	}
-	if !Contains(lk, 0, 23001) {
+	if _, ok := Contains(lk, 0, 23001); !ok {
 		t.Fatal(lk)
 	}
 }

@@ -74,7 +74,7 @@ func compressSize(a []uint16, block int) (res []byte) {
 	return final
 }
 
-func Contains(buf []byte, startValue, endValue uint16) bool {
+func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 	i := 0
 	j := len(buf) / blockSize
 	if j*blockSize < len(buf) {
@@ -92,7 +92,7 @@ func Contains(buf []byte, startValue, endValue uint16) bool {
 	i *= blockSize
 	if i < len(buf) {
 		if head, _ := binary.Uvarint(buf[i:]); startValue <= uint16(head) && uint16(head) <= endValue {
-			return true
+			return uint16(head), true
 		}
 	}
 
@@ -101,10 +101,10 @@ func Contains(buf []byte, startValue, endValue uint16) bool {
 		if end > len(buf) {
 			end = len(buf) // the last block may be shorter then 'block' bytes
 		}
-		found := 0
+		found := -2
 		ForeachFull(buf[i:end], func(head uint16) bool {
 			if startValue <= head && head <= endValue {
-				found = 1
+				found = int(head)
 				return false
 			}
 			if head > endValue {
@@ -114,14 +114,13 @@ func Contains(buf []byte, startValue, endValue uint16) bool {
 			return true
 		})
 
-		switch found {
-		case 1:
-			return true
-		case -1:
-			return false
+		if found >= 0 {
+			return uint16(found), true
+		} else if found == -1 {
+			return 0, false
 		}
 	}
-	return false
+	return 0, false
 }
 
 func Foreach(a []byte, f func(v uint16) bool) {

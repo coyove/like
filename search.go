@@ -88,7 +88,7 @@ func (db *DB) Search(query string, start []byte, n int, metrics *Metrics) (res [
 	}
 
 MORE:
-	db.marchSearch(tx, chars, start, metrics, func(key []byte, segs []uint16) bool {
+	db.marchSearch(tx, chars, start, metrics, func(key []byte, segs [][2]uint16) bool {
 		if len(res) >= n {
 			res = res[:n]
 			next = append([]byte(nil), key...)
@@ -104,8 +104,9 @@ MORE:
 			Index: index,
 			ID:    append([]byte(nil), docId...),
 			Score: score,
-			Segs:  append([]uint16(nil), segs...),
+			Segs:  append([][2]uint16(nil), segs...),
 		})
+		// fmt.Println(res)
 		return true
 	}, ddl)
 
@@ -116,7 +117,7 @@ MORE:
 				break
 			}
 			boundKey := res[len(res)-1].boundKey(nil)
-			db.marchSearch(tx, charsEx[i:i+1], start, metrics, func(key []byte, _ []uint16) bool {
+			db.marchSearch(tx, charsEx[i:i+1], start, metrics, func(key []byte, _ [][2]uint16) bool {
 				if bytes.Compare(key, boundKey) < 0 {
 					return false
 				}
@@ -146,10 +147,11 @@ MORE:
 	return
 }
 
-func (db *DB) marchSearch(tx *bbolt.Tx, chars []*segchars, start []byte, metrics *Metrics, f func([]byte, []uint16) bool, ddl int64) {
+func (db *DB) marchSearch(tx *bbolt.Tx, chars []*segchars, start []byte, metrics *Metrics, f func([]byte, [][2]uint16) bool, ddl int64) {
 	var cursors []*cursor
 
 	for _, sc := range chars {
+		sc.cursors = sc.cursors[:0]
 		for _, r := range sc.Chars {
 			bk := tx.Bucket(binary.BigEndian.AppendUint32([]byte(db.Namespace), uint32(r)))
 			if bk == nil {
@@ -186,7 +188,7 @@ func (db *DB) marchSearch(tx *bbolt.Tx, chars []*segchars, start []byte, metrics
 	}
 
 	var slowNow int
-	var segs []uint16
+	var segs [][2]uint16
 
 SWITCH_HEAD:
 	for head := cursors[0]; len(head.key) > 0; {
@@ -259,11 +261,10 @@ SWITCH_HEAD:
 			missThreshold := metrics.FuzzyMiss
 			dist := metrics.FuzzyDist
 			if missThreshold >= len(cc)/2 {
-				if len(cc) < 4 {
-					missThreshold = 0
-				} else {
-					missThreshold = len(cc) / 2
-				}
+				missThreshold = len(cc) / 2
+			}
+			if len(cc) <= 4 {
+				missThreshold = 0
 			}
 			if !seg.Fuzzy {
 				missThreshold = 0
@@ -273,19 +274,27 @@ SWITCH_HEAD:
 			array16.Foreach(cc[0].value, func(pos uint16) bool {
 				misses := 0
 				match = false
+				minPos, maxPos := pos, array16.AddSat(pos, uint16(len(cc))-1)
 				for i := 1; i < len(cc); i++ {
 					pos := array16.AddSat(pos, uint16(i))
-					if !array16.Contains(cc[i].value, array16.SubSat(pos, dist), array16.AddSat(pos, dist)) {
+					realPos, ok := array16.Contains(cc[i].value, array16.SubSat(pos, dist), array16.AddSat(pos, dist))
+					if !ok {
 						misses++
 						if misses > missThreshold {
 							return true
 						}
 					}
+					if realPos > maxPos {
+						maxPos = realPos
+					}
+					if realPos < minPos {
+						minPos = realPos
+					}
 				}
 
 				// Found
 				match = true
-				segs = append(segs, pos, array16.AddSat(pos, uint16(len(cc))-1))
+				segs = append(segs, [2]uint16{minPos, maxPos})
 				return false
 			})
 

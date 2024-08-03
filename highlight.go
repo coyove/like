@@ -3,8 +3,10 @@ package like
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"sort"
 	"unicode/utf8"
+
+	"github.com/coyove/like/array16"
 )
 
 type Metrics struct {
@@ -46,151 +48,91 @@ func (d *Metrics) String() string {
 	return string(buf)
 }
 
-func (d *Metrics) Highlight(content string, left, right string, expandhl int) (out string) {
-	if len(d.Chars) == 0 {
-		return content
+type Highlighter struct {
+	Left, Right string
+	Expand      int
+	Gap         int
+}
+
+func (hl *Highlighter) Do(d Document, content string) (out string) {
+	if len(d.Segs) == 0 || len(content) == 0 {
+		return ""
 	}
 
-	type radix struct {
-		ch   rune
-		end  bool
-		next map[rune]*radix
-		up   *radix
-	}
-
-	root := &radix{next: map[rune]*radix{}}
-	for _, m := range d.Chars {
-		n := root
-		for i, r := range m {
-			if n.next == nil {
-				n.next = map[rune]*radix{}
-			}
-			if n.next[r] == nil {
-				n.next[r] = &radix{ch: r, up: n}
-			}
-			n = n.next[r]
-			if i == len(m)-1 {
-				n.end = true
-			}
+	segs := d.Segs
+	sort.Slice(segs, func(i, j int) bool {
+		return segs[i][0] < segs[j][0]
+	})
+	for i := len(segs) - 1; i > 0; i-- {
+		if segs[i][0] <= array16.AddSat(segs[i-1][1], uint16(hl.Gap)) {
+			segs[i-1][1] = segs[i][1]
+			segs = append(segs[:i], segs[i+1:]...)
 		}
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			out = fmt.Sprintf("#FIXME:%v\n#", d.Chars) + content + "\n#FIXME"
-		}
-	}()
-
-	var spans [][2]int
-	var expands [][4]int
-	CollectFunc(content, func(_ int, pos [2]int, r rune, grams []rune) bool {
-		if len(root.next) == 0 {
+	var spans []int
+	CollectFunc(content, func(i int, pos [2]int, r rune, grams []rune) bool {
+		if len(segs) == 0 {
 			return false
 		}
-		if root.next[r] == nil {
-			return true
-		}
-
-		n := root
-		ok, start, end := false, pos[0], pos[0]
-		CollectFunc(content[pos[0]:], func(_ int, pos2 [2]int, r2 rune, grams2 []rune) bool {
-			if n.next[r2] == nil {
-				ok = false
-				return false
-			}
-			n = n.next[r2]
-			if !n.end {
-				return true
-			}
-			if len(n.next) == 0 {
-				for n0 := n.up; n0 != nil; n0 = n0.up {
-					delete(n0.next, n.ch)
-					if len(n0.next) > 0 {
-						break
-					}
-					n = n0
-				}
-			}
-			end = pos[0] + pos2[0] + pos2[1]
-			ok = true
-			return false
-		})
-		if !ok {
-			return true
-		}
-
-		if end > start {
-			if len(spans) > 0 && start < spans[len(spans)-1][1] {
-				spans[len(spans)-1][1] = end
-				expands[len(expands)-1][1] = end
-			} else {
-				expands = append(expands, [4]int{start, end, len(spans), len(spans) + 1})
-				spans = append(spans, [2]int{start, end})
-			}
+		seg := segs[0]
+		if i < int(seg[0]) {
+			// Continue
+		} else if i == int(seg[0]) && seg[0] == seg[1] {
+			spans = append(spans, pos[0], pos[0]+pos[1])
+			segs = segs[1:]
+		} else if i == int(seg[0]) {
+			spans = append(spans, pos[0])
+		} else if i < int(seg[1]) {
+			// Continue
+		} else if i == int(seg[1]) {
+			spans = append(spans, pos[0]+pos[1])
+			segs = segs[1:]
 		}
 		return true
 	})
 
+	if len(spans)%2 != 0 {
+		spans = append(spans, len(content))
+	}
+	if len(spans) == 0 {
+		return ""
+	}
+
 	p := bytes.Buffer{}
-	if expandhl == 0 {
-		start := 0
-		for _, s := range spans {
-			p.WriteString(content[start:s[0]])
-			p.WriteString(left)
-			p.WriteString(content[s[0]:s[1]])
-			p.WriteString(right)
-			start = s[1]
-		}
-		p.WriteString(content[start:])
-		return p.String()
-	}
-
-	for i := len(expands) - 1; i > 0; i-- {
-		if expands[i][0]-expands[i-1][1] < expandhl*2+10 {
-			expands[i-1][1] = expands[i][1]
-			expands[i-1][3] = expands[i][3]
-			expands = append(expands[:i], expands[i+1:]...)
-		}
-	}
-
-	eoc := false
-	for _, e := range expands {
-		start, end := e[0], e[1]
-		start0, end0 := e[0], e[1]
-		for start-start0 < expandhl && start0 > 0 {
-			r, w := utf8.DecodeLastRuneInString(content[:start0])
-			if r == utf8.RuneError {
-				break
-			}
-			start0 -= w
-		}
-
-		for end0-end < expandhl && end0 < len(content) {
-			r, w := utf8.DecodeRuneInString(content[end0:])
-			if r == utf8.RuneError {
-				break
-			}
-			end0 += w
-		}
-
-		if start0 > 0 {
-			p.WriteString("...")
-		}
-
-		for i := e[2]; i < e[3]; i++ {
-			p.WriteString(content[start0:spans[i][0]])
-			p.WriteString(left)
-			p.WriteString(content[spans[i][0]:spans[i][1]])
-			p.WriteString(right)
-			start0 = spans[i][1]
-		}
-
-		p.WriteString(content[start0:end0])
-		eoc = eoc || end0 == len(content)
-	}
-
-	if !eoc {
+	if spans[0] != 0 {
 		p.WriteString("...")
 	}
+	for i := 0; i < len(spans); i += 2 {
+		start, end := spans[i], spans[i+1]
+		text := content[start:end]
+
+		for n := 0; start > 0 && n < hl.Expand; n++ {
+			r, w := utf8.DecodeLastRuneInString(content[:start])
+			if r == utf8.RuneError {
+				break
+			}
+			p.WriteRune(r)
+			start -= w
+		}
+
+		p.WriteString(hl.Left)
+		p.WriteString(text)
+		p.WriteString(hl.Right)
+
+		for n := 0; end < len(content) && n < hl.Expand; n++ {
+			r, w := utf8.DecodeRuneInString(content[end:])
+			if r == utf8.RuneError {
+				break
+			}
+			p.WriteRune(r)
+			end += w
+		}
+
+		if end != len(content) {
+			p.WriteString("...")
+		}
+	}
+
 	return p.String()
 }

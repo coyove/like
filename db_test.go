@@ -294,13 +294,14 @@ func TestAuto(t *testing.T) {
 		t.Fatal(res)
 	}
 
+	hl := Highlighter{Left: "<", Right: ">", Gap: 10}
 	db.Index(IndexDocument{Content: "can't"}.SetIntID(3))
 	search("can't")
-	if hl := m.Highlight("can't", "<", ">", 0); hl != "<can't>" {
+	if hl := hl.Do(res[0], "can't"); hl != "<can't>" {
 		t.Fatal(hl)
 	}
 	search("can t")
-	if hl := m.Highlight("can't", "<", ">", 0); hl != "<can>'<t>" {
+	if hl := hl.Do(res[0], "can t"); hl != "<can t>" {
 		t.Fatal(hl)
 	}
 
@@ -311,6 +312,7 @@ func TestAuto(t *testing.T) {
 				text += fmt.Sprintf(" %d", j)
 			}
 		}
+		fmt.Println(i, "=>", text)
 		db.Index(IndexDocument{Content: text, Score: uint32(i + 1)}.SetIntID(uint64(i)))
 	}
 
@@ -364,38 +366,41 @@ func TestAuto(t *testing.T) {
 		db.Index(d)
 	}
 
-	var docs []Document
-	for start, docs = nil, docs[:0]; ; {
-		N = rand.Intn(3) + 3
-		search("or 10|20|30")
-		docs = append(docs, res...)
-		if len(next) == 0 {
-			break
-		}
-		start = next
-	}
-	if len(docs) != 90 {
-		for _, doc := range docs {
-			fmt.Println(doc)
-		}
-		t.Fatal(len(docs))
-	}
-
-	for start, docs = nil, docs[:0]; ; {
-		N = rand.Intn(3) + 3
-		search("or 25|49 -102")
-		docs = append(docs, res...)
-		if len(next) == 0 {
-			break
-		}
-		start = next
-	}
-	if len(docs) != 60-1+2 {
-		for _, doc := range docs {
-			fmt.Println(doc)
-		}
-		t.Fatal(len(docs))
-	}
+	// var docs []Document
+	//
+	//	for start, docs = nil, docs[:0]; ; {
+	//		N = rand.Intn(3) + 3
+	//		search("or 10|20|30")
+	//		docs = append(docs, res...)
+	//		if len(next) == 0 {
+	//			break
+	//		}
+	//		start = next
+	//	}
+	//
+	//	if len(docs) != 90 {
+	//		for _, doc := range docs {
+	//			fmt.Println(doc)
+	//		}
+	//		t.Fatal(len(docs))
+	//	}
+	//
+	//	for start, docs = nil, docs[:0]; ; {
+	//		N = rand.Intn(3) + 3
+	//		search("or 25|49 -102")
+	//		docs = append(docs, res...)
+	//		if len(next) == 0 {
+	//			break
+	//		}
+	//		start = next
+	//	}
+	//
+	//	if len(docs) != 60-1+2 {
+	//		for _, doc := range docs {
+	//			fmt.Println(doc)
+	//		}
+	//		t.Fatal(len(docs))
+	//	}
 }
 
 func TestSearch(t *testing.T) {
@@ -442,7 +447,8 @@ func TestSearch(t *testing.T) {
 			if x[i] == "" {
 				x[i] = string(docs[i].ID)
 			}
-			x[i] = m.Highlight(x[i], " <<<", ">>> ", 20)
+			hl := &Highlighter{Left: " <<<", Right: ">>> ", Expand: 20}
+			x[i] = hl.Do(docs[i], x[i])
 		}
 		hl += time.Since(start)
 

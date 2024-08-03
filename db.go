@@ -35,7 +35,7 @@ func (db *DB) OpenDefault(path string) (err error) {
 
 type Document struct {
 	Index uint64
-	Segs  []uint16
+	Segs  [][2]uint16
 	ID    []byte
 	Score uint32
 }
