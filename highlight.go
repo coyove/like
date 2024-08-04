@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"sort"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/coyove/like/array16"
@@ -103,29 +104,41 @@ func (hl *Highlighter) Do(d Document, content string) (out string) {
 	if spans[0] != 0 {
 		p.WriteString("...")
 	}
+
+	var prev []rune
 	for i := 0; i < len(spans); i += 2 {
 		start, end := spans[i], spans[i+1]
 		text := content[start:end]
 
-		for n := 0; start > 0 && n < hl.Expand; n++ {
+		prev = prev[:0]
+		for n := 0; start > 0 && n < hl.Expand; {
 			r, w := utf8.DecodeLastRuneInString(content[:start])
 			if r == utf8.RuneError {
 				break
 			}
-			p.WriteRune(r)
+			if !omitWS(r, p.Bytes()) {
+				prev = append(prev, r)
+				n++
+			}
 			start -= w
+		}
+		for i := len(prev) - 1; i >= 0; i-- {
+			p.WriteRune(prev[i])
 		}
 
 		p.WriteString(hl.Left)
 		p.WriteString(text)
 		p.WriteString(hl.Right)
 
-		for n := 0; end < len(content) && n < hl.Expand; n++ {
+		for n := 0; end < len(content) && n < hl.Expand; {
 			r, w := utf8.DecodeRuneInString(content[end:])
 			if r == utf8.RuneError {
 				break
 			}
-			p.WriteRune(r)
+			if !omitWS(r, p.Bytes()) {
+				p.WriteRune(r)
+				n++
+			}
 			end += w
 		}
 
@@ -135,4 +148,17 @@ func (hl *Highlighter) Do(d Document, content string) (out string) {
 	}
 
 	return p.String()
+}
+
+func omitWS(r rune, buf []byte) bool {
+	if r == '\n' {
+		return true
+	}
+	if len(buf) > 0 {
+		prev, _ := utf8.DecodeLastRune(buf)
+		if unicode.IsSpace(prev) && unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
 }

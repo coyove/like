@@ -1,13 +1,16 @@
 package like
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"time"
 	"unicode"
 	"unsafe"
 
 	"github.com/coyove/bbolt"
+	"github.com/pierrec/lz4/v4"
 )
 
 var shortDocString bool
@@ -38,6 +41,7 @@ type Document struct {
 	Segs  [][2]uint16
 	ID    []byte
 	Score uint32
+	db    *DB
 }
 
 func (d Document) boundKey(in []byte) []byte {
@@ -53,6 +57,24 @@ func (d Document) IntID() (v uint64) {
 
 func (d Document) StringID() (v string) {
 	return *(*string)(unsafe.Pointer(&d.ID))
+}
+
+func (d Document) Content() (v []byte, err error) {
+	tx, err := d.db.Store.Begin(false)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	bk := tx.Bucket([]byte(d.db.Namespace + "content"))
+	if bk == nil {
+		return nil, nil
+	}
+	comp := bk.Get(d.ID)
+	if len(comp) == 0 {
+		return nil, nil
+	}
+	rd := lz4.NewReader(bytes.NewReader(comp))
+	return io.ReadAll(rd)
 }
 
 func (d Document) String() string {

@@ -1,11 +1,14 @@
 package like
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"unsafe"
 
 	"github.com/coyove/bbolt"
 	"github.com/coyove/like/array16"
+	"github.com/pierrec/lz4/v4"
 )
 
 type IndexDocument struct {
@@ -121,6 +124,9 @@ func (db *DB) BatchIndex(docs []IndexDocument) []error {
 		}
 
 		bkId.Put(doc.ID, payload)
+
+		bkContent, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "content"))
+		bkContent.Put(doc.ID, compressString(doc.Content))
 	}
 
 	if db.maxDocsTest > 0 {
@@ -204,39 +210,18 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 		}
 	}
 
-	if len(oldPayload) > 0 {
-		work := func(v uint32) {
-			tmp = binary.BigEndian.AppendUint32(append(tmp[:0], ns...), v)
-			bk := tx.Bucket(tmp)
-			if action == "rescore" {
-				prev, _ := bk.TestDelete(AppendSortedUvarint(oldScore, index))
-				bk.Put(AppendSortedUvarint(binary.BigEndian.AppendUint32(nil, rescore), index), prev)
-			} else {
-				bk.SetSequence(bk.Sequence() - 1)
-				bk.Delete(AppendSortedUvarint(oldScore, index))
-			}
-			deletes++
+	foreachPayload(true, oldPayload, func(v uint32) {
+		tmp = binary.BigEndian.AppendUint32(append(tmp[:0], ns...), v)
+		bk := tx.Bucket(tmp)
+		if action == "rescore" {
+			prev, _ := bk.TestDelete(AppendSortedUvarint(oldScore, index))
+			bk.Put(AppendSortedUvarint(binary.BigEndian.AppendUint32(nil, rescore), index), prev)
+		} else {
+			bk.SetSequence(bk.Sequence() - 1)
+			bk.Delete(AppendSortedUvarint(oldScore, index))
 		}
-
-		runes1Len, w := binary.Uvarint(oldPayload)
-		oldPayload = oldPayload[w:]
-
-		array16.ForeachFull(oldPayload[:runes1Len], func(r uint16) bool {
-			work(uint32(r))
-			return true
-		})
-
-		oldPayload = oldPayload[runes1Len:]
-		runes2Len, w := binary.Uvarint(oldPayload)
-		oldPayload = oldPayload[w:]
-
-		for i := 0; i < len(oldPayload[:runes2Len*3]); i += 3 {
-			r := uint32(oldPayload[i])<<16 + uint32(oldPayload[i+1])<<8 + uint32(oldPayload[i+2])
-			work(r + 0x10000)
-		}
-
-		work(0)
-	}
+		deletes++
+	})
 
 	if action == "rescore" {
 		old := bkId.Get(id8)
@@ -248,6 +233,33 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 	}
 
 	return bkId, index
+}
+
+func foreachPayload(zero bool, buf []byte, work func(uint32)) {
+	if len(buf) == 0 {
+		return
+	}
+
+	runes1Len, w := binary.Uvarint(buf)
+	buf = buf[w:]
+
+	array16.ForeachFull(buf[:runes1Len], func(r uint16) bool {
+		work(uint32(r))
+		return true
+	})
+
+	buf = buf[runes1Len:]
+	runes2Len, w := binary.Uvarint(buf)
+	buf = buf[w:]
+
+	for i := 0; i < len(buf[:runes2Len*3]); i += 3 {
+		r := uint32(buf[i])<<16 + uint32(buf[i+1])<<8 + uint32(buf[i+2])
+		work(r + 0x10000)
+	}
+
+	if zero {
+		work(0)
+	}
 }
 
 func (db *DB) Count() (total int, watermark int, err error) {
@@ -283,4 +295,18 @@ func (db *DB) evict(tx *bbolt.Tx, diff int) {
 	for _, d := range toDeletes {
 		deleteTx(tx, db.Namespace, d, "delete", 0)
 	}
+}
+
+func compressString(in string) []byte {
+	var p []byte
+	*(*[3]int)(unsafe.Pointer(&p)) = [3]int{
+		*(*int)(unsafe.Pointer(&in)),
+		len(in),
+		len(in),
+	}
+	compressed := bytes.Buffer{}
+	w := lz4.NewWriter(&compressed)
+	w.Write(p)
+	w.Close()
+	return compressed.Bytes()
 }

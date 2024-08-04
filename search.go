@@ -105,6 +105,7 @@ MORE:
 			ID:    append([]byte(nil), docId...),
 			Score: score,
 			Segs:  append([][2]uint16(nil), segs...),
+			db:    db,
 		})
 		// fmt.Println(res)
 		return true
