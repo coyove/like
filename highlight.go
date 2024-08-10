@@ -17,6 +17,8 @@ type Metrics struct {
 	FuzzyDist uint16      `json:"fuzzy_dist,omitempty"`
 	FuzzyMiss int         `json:"fuzzy_miss,omitempty"`
 
+	Deduplicator func(Document) bool `json:"-"`
+
 	Query          string `json:"query"`
 	Error          string `json:"error"`
 	Seek           int    `json:"seek"`

@@ -171,6 +171,10 @@ func (db *DB) Delete(doc IndexDocument) error {
 	defer tx.Rollback()
 
 	deleteTx(tx, db.Namespace, doc.ID, "delete", 0)
+
+	bkContent, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "content"))
+	bkContent.Delete(doc.ID)
+
 	return tx.Commit()
 }
 

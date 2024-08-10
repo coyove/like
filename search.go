@@ -100,13 +100,16 @@ MORE:
 		score := binary.BigEndian.Uint32(key[:4])
 		docId := bkIndex.Get(indexBuf)
 
-		res = append(res, Document{
+		doc := Document{
 			Index: index,
 			ID:    append([]byte(nil), docId...),
 			Score: score,
 			Segs:  append([][2]uint16(nil), segs...),
 			db:    db,
-		})
+		}
+		if metrics.Deduplicator == nil || !metrics.Deduplicator(doc) {
+			res = append(res, doc)
+		}
 		// fmt.Println(res)
 		return true
 	}, ddl)
@@ -138,11 +141,12 @@ MORE:
 		}
 
 		// fmt.Println("=========== END ", res, n, next)
-		if len(res) < n && len(next) > 0 {
-			start = next
-			next = nil
-			goto MORE
-		}
+	}
+
+	if len(res) < n && len(next) > 0 && !metrics.Timeout {
+		start = next
+		next = nil
+		goto MORE
 	}
 
 	return
@@ -284,6 +288,7 @@ SWITCH_HEAD:
 						if misses > missThreshold {
 							return true
 						}
+						continue
 					}
 					if realPos > maxPos {
 						maxPos = realPos
