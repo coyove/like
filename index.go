@@ -175,6 +175,26 @@ func (db *DB) Delete(doc IndexDocument) error {
 	return tx.Commit()
 }
 
+func (db *DB) GetIndexAndScore(docID []byte) (uint64, uint32, error) {
+	tx, err := db.Store.Begin(false)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	bkId := tx.Bucket([]byte(db.Namespace))
+	if bkId == nil {
+		return 0, 0, nil
+	}
+	payload := bkId.Get(docID)
+	if len(payload) == 0 {
+		return 0, 0, nil
+	}
+	index, w := SortedUvarint(payload)
+	score := binary.BigEndian.Uint32(payload[w:])
+	return index, score, nil
+}
+
 func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32) (*bbolt.Bucket, uint64) {
 	bkId, _ := tx.CreateBucketIfNotExists([]byte(ns))
 	bkIndex, _ := tx.CreateBucketIfNotExists([]byte(ns + "index"))
