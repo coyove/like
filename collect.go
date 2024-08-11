@@ -11,22 +11,6 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-type set func(rune) bool
-
-func (a set) add(rt *unicode.RangeTable) set {
-	b := in(rt)
-	return func(r rune) bool { return a(r) || b(r) }
-}
-
-func (a set) sub(rt *unicode.RangeTable) set {
-	b := in(rt)
-	return func(r rune) bool { return a(r) && !b(r) }
-}
-
-func in(rt *unicode.RangeTable) set {
-	return func(r rune) bool { return unicode.Is(rt, r) }
-}
-
 var letterBMP1Fast = func() (letter [65536 / 8]byte) {
 	for i := 0; i < 65536; i++ {
 		if isNonLogoLetter(rune(i)) {
@@ -37,21 +21,32 @@ var letterBMP1Fast = func() (letter [65536 / 8]byte) {
 }()
 
 var continueBMP1Fast = func() (cont [65536 / 8]byte) {
-	id_continue := set(unicode.IsLetter).
-		add(unicode.Nl).
-		add(unicode.Other_ID_Start).
-		sub(unicode.Pattern_Syntax).
-		sub(unicode.Pattern_White_Space).
-		add(unicode.Mn).
-		add(unicode.Mc).
-		add(unicode.Nd).
-		add(unicode.Pc).
-		add(unicode.Other_ID_Continue).
-		sub(unicode.Pattern_Syntax).
-		sub(unicode.Pattern_White_Space)
+	// id_continue := set(unicode.IsLetter).
+	// 	add(unicode.Nl).
+	// 	add(unicode.Other_ID_Start).
+	// 	sub(unicode.Pattern_Syntax).
+	// 	sub(unicode.Pattern_White_Space).
+	// 	add(unicode.Mn).
+	// 	add(unicode.Mc).
+	// 	add(unicode.Nd).
+	// 	add(unicode.Pc).
+	// 	add(unicode.Other_ID_Continue).
+	// 	sub(unicode.Pattern_Syntax).
+	// 	sub(unicode.Pattern_White_Space)
 	for i := 0; i < 65536; i++ {
-		if id_continue(rune(i)) {
-			cont[i/8] |= 1 << (i % 8)
+		r := rune(i)
+		if unicode.IsLetter(r) ||
+			unicode.Is(unicode.Nl, r) ||
+			unicode.Is(unicode.Other_ID_Start, r) ||
+			unicode.Is(unicode.Mn, r) ||
+			unicode.Is(unicode.Mc, r) ||
+			unicode.Is(unicode.Nd, r) ||
+			unicode.Is(unicode.Pc, r) ||
+			unicode.Is(unicode.Other_ID_Continue, r) {
+
+			if !unicode.Is(unicode.Pattern_Syntax, r) && !unicode.Is(unicode.Pattern_White_Space, r) {
+				cont[i/8] |= 1 << (i % 8)
+			}
 		}
 	}
 	return
@@ -73,7 +68,7 @@ var normBMP1Fast = func() (res [65536]uint16) {
 	return
 }()
 
-func convertNonLogoLetter(r rune) rune {
+func normalizeNonLogoLetter(r rune) rune {
 	if r < 65536 && letterBMP1Fast[r/8]&(1<<(r%8)) > 0 {
 		goto NORM
 	}
@@ -149,12 +144,12 @@ func CollectFunc(source string, indexOnly bool, f func(int, [2]int, rune, []rune
 
 		grams = grams[:0]
 
-		if r2 := convertNonLogoLetter(r); r2 > 0 {
+		if r2 := normalizeNonLogoLetter(r); r2 > 0 {
 			grams = append(grams[:0], r2)
 			offs = append(offs[:0], prevOff)
 			for {
 				r, w := utf8.DecodeRuneInString(source[off:])
-				cr := convertNonLogoLetter(r)
+				cr := normalizeNonLogoLetter(r)
 				if cr == 0 {
 					if r == 0x200D || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r) {
 						// ZWJ, Mn & Mc after letters should be considered.

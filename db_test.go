@@ -294,14 +294,14 @@ func TestAuto(t *testing.T) {
 		t.Fatal(res)
 	}
 
-	hl := Highlighter{Left: "<", Right: ">", Gap: 10}
+	hl := &Highlighter{Left: "<", Right: ">", Gap: 10}
 	db.Index(IndexDocument{Content: "can't"}.SetIntID(3))
 	search("can't")
-	if hl := hl.Do(res[0], "can't"); hl != "<can't>" {
+	if hl := res[0].Highlight(hl); hl != "<can't>" {
 		t.Fatal(hl)
 	}
 	search("can t")
-	if hl := hl.Do(res[0], "can t"); hl != "<can t>" {
+	if hl := res[0].Highlight(hl); hl != "<can't>" {
 		t.Fatal(hl)
 	}
 
@@ -448,7 +448,7 @@ func TestSearch(t *testing.T) {
 				x[i] = string(docs[i].ID)
 			}
 			hl := &Highlighter{Left: " <<<", Right: ">>> ", Expand: 20}
-			x[i] = hl.Do(docs[i], x[i])
+			x[i] = docs[i].Highlight(hl)
 		}
 		hl += time.Since(start)
 

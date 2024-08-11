@@ -172,15 +172,13 @@ func (db *DB) Delete(doc IndexDocument) error {
 
 	deleteTx(tx, db.Namespace, doc.ID, "delete", 0)
 
-	bkContent, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "content"))
-	bkContent.Delete(doc.ID)
-
 	return tx.Commit()
 }
 
 func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32) (*bbolt.Bucket, uint64) {
 	bkId, _ := tx.CreateBucketIfNotExists([]byte(ns))
 	bkIndex, _ := tx.CreateBucketIfNotExists([]byte(ns + "index"))
+	bkContent, _ := tx.CreateBucketIfNotExists([]byte(ns + "content"))
 
 	var tmp []byte
 	var deletes int
@@ -206,6 +204,7 @@ func deleteTx(tx *bbolt.Tx, ns string, id8 []byte, action string, rescore uint32
 		bkIndex.Delete(AppendSortedUvarint(nil, index))
 		bkIndex.SetSequence(bkIndex.Sequence() - 1)
 		bkId.Delete(id8)
+		bkContent.Delete(id8)
 	} else {
 		bkIndex.Put(AppendSortedUvarint(nil, index), id8)
 		if len(oldPayload) == 0 { // new doc
