@@ -126,7 +126,7 @@ func (db *DB) BatchIndex(docs []IndexDocument) []error {
 		bkId.Put(doc.ID, payload)
 
 		bkContent, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "content"))
-		bkContent.Put(doc.ID, compressString(doc.Content))
+		bkContent.Put(doc.ID, []byte(doc.Content))
 	}
 
 	if db.maxDocsTest > 0 {

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"unicode"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/coyove/like/array16"
 )
@@ -30,7 +31,7 @@ type Metrics struct {
 }
 
 func (d *Metrics) Collect(term string, maxChars uint16) (parts []rune) {
-	CollectFunc(term, func(i int, off [2]int, r rune, gram []rune) bool {
+	CollectFunc(term, false, func(i int, off [2]int, r rune, gram []rune) bool {
 		if i >= int(maxChars) {
 			return false
 		}
@@ -57,11 +58,24 @@ type Highlighter struct {
 	Gap         int
 }
 
-func (hl *Highlighter) Do(d Document, content string) (out string) {
-	if len(d.Segs) == 0 || len(content) == 0 {
+func (d Document) Highlight(hl *Highlighter) (out string) {
+	tx, err := d.db.Store.Begin(false)
+	if err != nil {
+		return ""
+	}
+	defer tx.Rollback()
+
+	bk := tx.Bucket([]byte(d.db.Namespace + "content"))
+	if bk == nil {
+		return ""
+	}
+	data := bk.Get(d.ID)
+
+	if len(d.Segs) == 0 || len(data) == 0 {
 		return ""
 	}
 
+	content := *(*string)(unsafe.Pointer(&data))
 	segs := d.Segs
 	sort.Slice(segs, func(i, j int) bool {
 		return segs[i][0] < segs[j][0]
@@ -74,7 +88,7 @@ func (hl *Highlighter) Do(d Document, content string) (out string) {
 	}
 
 	var spans []int
-	CollectFunc(content, func(i int, pos [2]int, r rune, grams []rune) bool {
+	CollectFunc(content, true, func(i int, pos [2]int, _ rune, grams []rune) bool {
 		if len(segs) == 0 {
 			return false
 		}
