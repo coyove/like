@@ -110,7 +110,7 @@ func (db *DB) BatchIndex(docs []IndexDocument) []error {
 		payload := AppendSortedUvarint(nil, index)
 		payload = binary.BigEndian.AppendUint32(payload, doc.Score)
 
-		buf1 := array16.CompressFull(runes1)
+		buf1 := array16.Compress(runes1)
 		payload = binary.AppendUvarint(payload, uint64(len(buf1)))
 		payload = append(payload, buf1...)
 		payload = binary.AppendUvarint(payload, uint64(len(runes2)))
@@ -266,7 +266,7 @@ func foreachPayload(zero bool, buf []byte, work func(uint32)) {
 	runes1Len, w := binary.Uvarint(buf)
 	buf = buf[w:]
 
-	array16.ForeachFull(buf[:runes1Len], func(r uint16) bool {
+	array16.Foreach(buf[:runes1Len], func(r uint16) bool {
 		work(uint32(r))
 		return true
 	})

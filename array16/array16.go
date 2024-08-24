@@ -7,22 +7,15 @@ import (
 	"sort"
 )
 
-const blockSize = 16
-
 func Compress(a []uint16) (res []byte) {
-	return compressSize(a, blockSize)
-}
-
-func CompressFull(a []uint16) (res []byte) {
-	return compressSize(a, 1e8)
-}
-
-func compressSize(a []uint16, block int) (res []byte) {
-	if len(a) == 0 {
-		return nil
-	}
-
 	sort.Slice(a, func(i, j int) bool { return a[i] < a[j] })
+	return compressSize(nil, a)
+}
+
+func compressSize(out []byte, a []uint16) []byte {
+	if len(a) == 0 {
+		return out
+	}
 
 	d := make([]uint16, 0, len(a))
 	for i := 1; i < len(a); i++ {
@@ -30,49 +23,45 @@ func compressSize(a []uint16, block int) (res []byte) {
 	}
 	// fmt.Println(d)
 
-	var final []byte
-	buf := binary.AppendUvarint(nil, uint64(a[0]))
-	for i := 1; len(d) > 0; {
-		pack5, pack3 := false, false
-		if len(d) >= 5 && d[0] < 64 && d[1] < 64 && d[2] < 64 && d[3] < 64 && d[4] < 64 {
-			pack5 = len(buf)+4 <= block
-		}
-		if !pack5 {
-			if len(d) >= 3 && d[0] < 1024 && d[1] < 1024 && d[2] < 1024 {
-				s := 0
-				for i := 0; i < 3; i++ {
-					if d[i] >= 64 {
-						s++
-					}
-				}
-				if s >= 2 {
-					pack3 = len(buf)+4 <= block
-				}
-			}
-		}
-		if pack5 {
-			var x uint32 = 1<<31 | 1<<30 | uint32(d[0])<<24 | uint32(d[1])<<18 | uint32(d[2])<<12 | uint32(d[3])<<6 | uint32(d[4])
-			buf = binary.BigEndian.AppendUint32(buf, x)
-			d = d[5:]
-			i += 5
-		} else if pack3 {
-			var x uint32 = 1<<31 | 0<<30 | uint32(d[0])<<20 | uint32(d[1])<<10 | uint32(d[2])
-			buf = binary.BigEndian.AppendUint32(buf, x)
-			d = d[3:]
-			i += 3
+	var buf bits16
+	buf.append(a[0], 16)
+	a = a[1:]
+
+	for len(d) > 0 {
+		off := d[0]
+		if off < 32 && buf.remains() >= 6 {
+			buf.appendBit(0)
+			buf.append(off, 5)
+		} else if off < 1024 && buf.remains() >= 12 {
+			buf.appendBit(1)
+			buf.appendBit(0)
+			buf.append(off, 10)
+		} else if off < 4096 && buf.remains() >= 15 {
+			buf.appendBit(1)
+			buf.appendBit(1)
+			buf.appendBit(0)
+			buf.append(off, 12)
+		} else if off < 32768 && buf.remains() >= 18 {
+			buf.appendBit(1)
+			buf.appendBit(1)
+			buf.appendBit(1)
+			buf.append(off, 15)
 		} else {
-			buf = appendUvarint(buf, uint64(d[0]))
-			if len(buf) > block {
-				final = append(final, buf[:block]...)
-				buf = binary.AppendUvarint(buf[:0], uint64(a[i]))
-			}
-			d = d[1:]
-			i++
+			buf.append(0, 6)
+			out = buf.writeFull(out)
+			buf = bits16{}
+			buf.append(a[0], 16)
 		}
+		a = a[1:]
+		d = d[1:]
 	}
-	final = append(final, buf...)
-	return final
+
+	buf.append(0, 6)
+	out = buf.write(out)
+	return out
 }
+
+const blockSize = 16
 
 func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 	i := 0
@@ -83,7 +72,7 @@ func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 	for i < j {
 		h := int(uint(i+j) >> 1) // avoid overflow when computing h
 		// i ≤ h < j
-		if head, _ := binary.Uvarint(buf[h*blockSize:]); uint16(head) < startValue {
+		if head := binary.BigEndian.Uint16(buf[h*blockSize:]); uint16(head) < startValue {
 			i = h + 1 // preserves f(i-1) == false
 		} else {
 			j = h // preserves f(j) == true
@@ -91,7 +80,7 @@ func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 	}
 	i *= blockSize
 	if i < len(buf) {
-		if head, _ := binary.Uvarint(buf[i:]); startValue <= uint16(head) && uint16(head) <= endValue {
+		if head := binary.BigEndian.Uint16(buf[i:]); startValue <= uint16(head) && uint16(head) <= endValue {
 			return uint16(head), true
 		}
 	}
@@ -102,7 +91,7 @@ func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 			end = len(buf) // the last block may be shorter then 'block' bytes
 		}
 		found := -2
-		ForeachFull(buf[i:end], func(head uint16) bool {
+		ForeachBlock(buf[i:end], func(head uint16) bool {
 			if startValue <= head && head <= endValue {
 				found = int(head)
 				return false
@@ -129,7 +118,7 @@ func Foreach(a []byte, f func(v uint16) bool) {
 		if end > len(a) {
 			end = len(a) // the last block may be shorter then 'block' bytes
 		}
-		if !ForeachFull(a[i:end], f) {
+		if !ForeachBlock(a[i:end], f) {
 			break
 		}
 	}
@@ -141,89 +130,77 @@ func Len(a []byte) (c int) {
 		if end > len(a) {
 			end = len(a)
 		}
-		ForeachFull(a[i:end], func(uint16) bool { c++; return true })
+		ForeachBlock(a[i:end], func(uint16) bool { c++; return true })
 	}
 	return
 }
 
-func ForeachFull(x []byte, f func(v uint16) bool) bool {
+var zzz [8]int
+
+func ForeachBlock(x []byte, f func(v uint16) bool) bool {
 	if len(x) == 0 {
 		return true
 	}
-	v, w := binary.Uvarint(x)
-	head := uint16(v)
+
+	var tmp [16]byte
+	copy(tmp[:], x)
+	rd := bits16{}
+	rd.value[0] = binary.BigEndian.Uint64(tmp[:8])
+	rd.value[1] = binary.BigEndian.Uint64(tmp[8:])
+
+	head, ok := rd.read(16)
+	if !ok {
+		panic("bad read")
+	}
 	if !f(head) {
 		return false
 	}
-	x = x[w:]
 
-	for len(x) > 0 {
-		if x[0]>>7 == 0 {
-			next, w := uvarint(x)
-			if w <= 0 {
+	for {
+		h, ok := rd.read(3)
+		if !ok {
+			break
+		}
+
+		switch h {
+		case 0b000, 0b001, 0b010, 0b011:
+			v, ok := rd.read(3) // 5
+			v = h<<3 | v
+			if !ok || v == 0 {
 				break
 			}
-			head += uint16(next)
-			if !f(head) {
-				return false
+			head += v
+			zzz[h]++
+		case 0b100, 0b101:
+			zzz[h]++
+			v, ok := rd.read(9) // 10
+			v = (h&1)<<9 | v
+			if !ok || v == 0 {
+				panic("bad read")
 			}
-			x = x[w:]
-		} else if x[0]>>6 == 2 { // 0b10, pack3
-			y := binary.BigEndian.Uint32(x)
-			for _, a := range [3]uint32{(y >> 20) & 0x3ff, (y >> 10) & 0x3ff, (y) & 0x3ff} {
-				if head += uint16(a); !f(head) {
-					return false
-				}
+			head += v
+		case 0b110:
+			zzz[h]++
+			v, ok := rd.read(12) // 12
+			if !ok || v == 0 {
+				panic("bad read")
 			}
-			x = x[4:]
-		} else { // 0b11, pack5
-			y := binary.BigEndian.Uint32(x)
-			for _, a := range [5]uint32{(y >> 24) & 0x3f, (y >> 18) & 0x3f, (y >> 12) & 0x3f, (y >> 6) & 0x3f, (y) & 0x3f} {
-				if head += uint16(a); !f(head) {
-					return false
-				}
+			head += v
+		case 0b111:
+			zzz[h]++
+			v, ok := rd.read(15) // 15
+			if !ok || v == 0 {
+				panic("bad read")
 			}
-			x = x[4:]
+			head += v
+		}
+
+		if !f(head) {
+			return false
 		}
 	}
+	// fmt.Println(zzz)
 	return true
-}
-
-func appendUvarint(buf []byte, x uint64) []byte {
-	if x < 0x40 {
-		return append(buf, byte(x|0x40))
-	}
-	buf = append(buf, byte(x&0x3f))
-	x >>= 6
-	for x >= 0x80 {
-		buf = append(buf, byte(x&0x7f))
-		x >>= 7
-	}
-	return append(buf, byte(x|0x80))
-}
-
-func uvarint(buf []byte) (uint64, int) {
-	if len(buf) == 0 {
-		return 0, 0
-	}
-
-	b := buf[0]
-	x := uint64(b & 0x3f)
-	if b >= 0x40 {
-		return x, 1
-	}
-	s := 6
-
-	for i := 1; i < len(buf); i++ {
-		b := buf[i]
-		x |= uint64(b&0x7f) << s
-		if b >= 0x80 {
-			return x, i + 1
-		}
-		s += 7
-	}
-
-	return 0, -1
 }
 
 func Stringify(v []byte) string {

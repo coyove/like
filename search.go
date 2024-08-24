@@ -277,6 +277,10 @@ SWITCH_HEAD:
 			}
 
 			array16.Foreach(cc[0].value, func(pos uint16) bool {
+				return true
+			})
+
+			array16.Foreach(cc[0].value, func(pos uint16) bool {
 				misses := 0
 				match = false
 				minPos, maxPos := pos, array16.AddSat(pos, uint16(len(cc))-1)
