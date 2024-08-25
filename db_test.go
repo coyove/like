@@ -62,7 +62,7 @@ func TestDataset(t *testing.T) {
 		}.SetStringID(title+" "+ingr+" "+steps))
 
 		if len(docs) == 1000 {
-			err := db.BatchIndex(docs)
+			err := db.BatchIndex(docs, false)
 			if err != nil {
 				panic(err)
 			}

@@ -6,9 +6,9 @@ import (
 	"sort"
 	"unicode"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/coyove/like/array16"
+	"github.com/dop251/scsu"
 )
 
 type Metrics struct {
@@ -71,11 +71,11 @@ func (d Document) Highlight(hl *Highlighter) (out string) {
 	}
 	data := bk.Get(d.ID)
 
-	if len(d.Segs) == 0 || len(data) == 0 {
+	content, _ := scsu.Decode(data)
+	if len(d.Segs) == 0 || len(content) == 0 {
 		return ""
 	}
 
-	content := *(*string)(unsafe.Pointer(&data))
 	segs := d.Segs
 	sort.Slice(segs, func(i, j int) bool {
 		return segs[i][0] < segs[j][0]

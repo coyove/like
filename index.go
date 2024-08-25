@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"unsafe"
+	"sort"
 
 	"github.com/coyove/bbolt"
 	"github.com/coyove/like/array16"
-	"github.com/pierrec/lz4/v4"
+	"github.com/dop251/scsu"
 )
 
 type IndexDocument struct {
@@ -41,12 +41,17 @@ func (d IndexDocument) String() string {
 }
 
 func (db *DB) Index(doc IndexDocument) error {
-	return db.BatchIndex([]IndexDocument{doc})[0]
+	return db.BatchIndex([]IndexDocument{doc}, false)[0]
 }
 
-func (db *DB) BatchIndex(docs []IndexDocument) []error {
+func (db *DB) BatchIndex(docs []IndexDocument, sortInsert bool) []error {
 	if len(docs) == 0 {
 		return nil
+	}
+	if sortInsert {
+		sort.Slice(docs, func(i, j int) bool {
+			return bytes.Compare(docs[i].ID, docs[j].ID) < 0
+		})
 	}
 
 	errs := make([]error, len(docs))
@@ -60,6 +65,11 @@ func (db *DB) BatchIndex(docs []IndexDocument) []error {
 	defer tx.Rollback()
 
 	for i, doc := range docs {
+		contentBytes, err := scsu.Encode(doc.Content, nil)
+		if err != nil {
+			errs[i] = fmt.Errorf("invalid document content: %v", err)
+			continue
+		}
 		chars, _ := Collect(doc.Content, db.MaxChars)
 		if len(doc.ID) == 0 {
 			errs[i] = fmt.Errorf("empty document ID")
@@ -123,10 +133,15 @@ func (db *DB) BatchIndex(docs []IndexDocument) []error {
 			payload = append(payload, byte(k>>16), byte(k>>8), byte(k))
 		}
 
-		bkId.Put(doc.ID, payload)
-
 		bkContent, _ := tx.CreateBucketIfNotExists([]byte(db.Namespace + "content"))
-		bkContent.Put(doc.ID, []byte(doc.Content))
+
+		if sortInsert {
+			bkId.FillPercent = 95
+			bkContent.FillPercent = 95
+		}
+
+		bkId.Put(doc.ID, payload)
+		bkContent.Put(doc.ID, contentBytes)
 	}
 
 	if db.maxDocsTest > 0 {
@@ -318,18 +333,4 @@ func (db *DB) evict(tx *bbolt.Tx, diff int) {
 	for _, d := range toDeletes {
 		deleteTx(tx, db.Namespace, d, "delete", 0)
 	}
-}
-
-func compressString(in string) []byte {
-	var p []byte
-	*(*[3]int)(unsafe.Pointer(&p)) = [3]int{
-		*(*int)(unsafe.Pointer(&in)),
-		len(in),
-		len(in),
-	}
-	compressed := bytes.Buffer{}
-	w := lz4.NewWriter(&compressed)
-	w.Write(p)
-	w.Close()
-	return compressed.Bytes()
 }

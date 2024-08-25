@@ -24,7 +24,7 @@ func compressSize(out []byte, a []uint16) []byte {
 	// fmt.Println(d)
 
 	var buf bits16
-	buf.append(a[0], 16)
+	buf.appendHeader(a[0])
 	a = a[1:]
 
 	for len(d) > 0 {
@@ -32,10 +32,10 @@ func compressSize(out []byte, a []uint16) []byte {
 		if off < 32 && buf.remains() >= 6 {
 			buf.appendBit(0)
 			buf.append(off, 5)
-		} else if off < 1024 && buf.remains() >= 12 {
+		} else if off < 512 && buf.remains() >= 11 {
 			buf.appendBit(1)
 			buf.appendBit(0)
-			buf.append(off, 10)
+			buf.append(off, 9)
 		} else if off < 4096 && buf.remains() >= 15 {
 			buf.appendBit(1)
 			buf.appendBit(1)
@@ -50,13 +50,13 @@ func compressSize(out []byte, a []uint16) []byte {
 			buf.append(0, 6)
 			out = buf.writeFull(out)
 			buf = bits16{}
-			buf.append(a[0], 16)
+			buf.appendHeader(a[0])
 		}
 		a = a[1:]
 		d = d[1:]
 	}
 
-	buf.append(0, 6)
+	// buf.append(0, 6)
 	out = buf.write(out)
 	return out
 }
@@ -72,7 +72,7 @@ func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 	for i < j {
 		h := int(uint(i+j) >> 1) // avoid overflow when computing h
 		// i ≤ h < j
-		if head := binary.BigEndian.Uint16(buf[h*blockSize:]); uint16(head) < startValue {
+		if head, _ := readHeader(buf[h*blockSize:]); head < startValue {
 			i = h + 1 // preserves f(i-1) == false
 		} else {
 			j = h // preserves f(j) == true
@@ -80,7 +80,7 @@ func Contains(buf []byte, startValue, endValue uint16) (uint16, bool) {
 	}
 	i *= blockSize
 	if i < len(buf) {
-		if head := binary.BigEndian.Uint16(buf[i:]); startValue <= uint16(head) && uint16(head) <= endValue {
+		if head, _ := readHeader(buf[i:]); startValue <= head && head <= endValue {
 			return uint16(head), true
 		}
 	}
@@ -142,16 +142,15 @@ func ForeachBlock(x []byte, f func(v uint16) bool) bool {
 		return true
 	}
 
+	head, ptr := readHeader(x)
+
 	var tmp [16]byte
 	copy(tmp[:], x)
 	rd := bits16{}
 	rd.value[0] = binary.BigEndian.Uint64(tmp[:8])
 	rd.value[1] = binary.BigEndian.Uint64(tmp[8:])
+	rd.ptr = ptr
 
-	head, ok := rd.read(16)
-	if !ok {
-		panic("bad read")
-	}
 	if !f(head) {
 		return false
 	}
@@ -167,14 +166,14 @@ func ForeachBlock(x []byte, f func(v uint16) bool) bool {
 			v, ok := rd.read(3) // 5
 			v = h<<3 | v
 			if !ok || v == 0 {
-				break
+				return true
 			}
 			head += v
 			zzz[h]++
 		case 0b100, 0b101:
 			zzz[h]++
-			v, ok := rd.read(9) // 10
-			v = (h&1)<<9 | v
+			v, ok := rd.read(8) // 9
+			v = (h&1)<<8 | v
 			if !ok || v == 0 {
 				panic("bad read")
 			}

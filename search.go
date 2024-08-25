@@ -276,9 +276,7 @@ SWITCH_HEAD:
 				dist = 0
 			}
 
-			array16.Foreach(cc[0].value, func(pos uint16) bool {
-				return true
-			})
+			// fmt.Println(len(cc[0].value), array16.Stringify(cc[0].value))
 
 			array16.Foreach(cc[0].value, func(pos uint16) bool {
 				misses := 0
